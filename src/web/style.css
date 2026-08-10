@@ -352,9 +352,25 @@ button.suggest {
   gap: 4px;
 }
 
-.hand .card { cursor: grab; }
+.hand {
+  user-select: none;
+}
 
-.hand .card.dragging { opacity: 0.4; }
+.hand .card {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.hand .card.dragging {
+  opacity: 0.65;
+  z-index: 10;
+  box-shadow: 0 8px 16px rgb(0 0 0 / 50%);
+  transition: none;
+}
+
+.hand .card.drop-before {
+  box-shadow: -5px 0 0 0 var(--accent), 0 1px 3px rgb(0 0 0 / 40%);
+}
 
 .hand .card.group-start { margin-left: calc(var(--card-w) * 0.3); }
 

@@ -30,7 +30,7 @@ const en = {
     melds: 'Sort: Melds',
     manual: 'Sort: Manual',
   } as Record<string, string>,
-  dragHint: 'Click two cards to swap them (or drag) — works in any sort mode.',
+  dragHint: 'Drag cards to rearrange your hand — works in any sort mode.',
   dealer: 'Dealer',
   points: (n: number) => `${n >= 0 ? '+' : ''}${n} pts`,
   cardsInHand: (n: number) => `${n} cards in hand`,
@@ -52,7 +52,7 @@ const en = {
 
   discardBtn: (card: string) => `Discard ${card}`,
   discardHint:
-    'Click the same card twice (or the button) to discard it. Click two different cards to swap them.',
+    'Click a card to select it, click it again (or the button) to discard. Drag cards to rearrange.',
   passDraw: 'Pass — draw from the wall',
   passRelay: 'Pass — hand it on',
 
@@ -184,7 +184,7 @@ const vi: typeof en = {
     melds: 'Xếp: Bộ',
     manual: 'Xếp: Tự do',
   },
-  dragHint: 'Nhấn hai lá để đổi chỗ (hoặc kéo thả) — dùng được ở mọi kiểu xếp.',
+  dragHint: 'Kéo thả lá bài để tự sắp xếp — dùng được ở mọi kiểu xếp.',
   dealer: 'Cái',
   points: (n) => `${n >= 0 ? '+' : ''}${n} điểm`,
   cardsInHand: (n) => `${n} lá trên tay`,
@@ -206,7 +206,7 @@ const vi: typeof en = {
 
   discardBtn: (card) => `Đánh ${card}`,
   discardHint:
-    'Nhấn hai lần vào cùng một lá (hoặc nhấn nút) để đánh ra. Nhấn hai lá khác nhau để đổi chỗ.',
+    'Nhấn vào một lá để chọn, nhấn lần nữa (hoặc nhấn nút) để đánh ra. Kéo thả để tự sắp xếp.',
   passDraw: 'Bỏ qua — bốc nọc',
   passRelay: 'Không ăn — nhường qua',
 

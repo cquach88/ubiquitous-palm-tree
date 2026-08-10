@@ -407,15 +407,6 @@ function reorderManual(dragId: number, targetId: number | null): void {
   toManualOrder(without);
 }
 
-/** Click-click: swap the positions of two cards. Works from any sort mode. */
-function swapCards(a: number, b: number): void {
-  const order = displayedHand().cards.map((c) => c.id);
-  const ia = order.indexOf(a);
-  const ib = order.indexOf(b);
-  if (ia < 0 || ib < 0) return;
-  [order[ia], order[ib]] = [order[ib], order[ia]];
-  toManualOrder(order);
-}
 
 // ---------- rendering ----------
 
@@ -553,6 +544,7 @@ function humanActionsHTML(sug: Suggestion | null): string {
 }
 
 function humanSeatHTML(): string {
+  const canPick = state.phase.type === 'discard' && state.phase.player === mySeat;
   const sug = coachSuggestion();
   const suggestedId = sug?.action.type === 'discard' ? sug.action.cardId : null;
   const { cards, starts } = displayedHand();
@@ -572,8 +564,8 @@ function humanSeatHTML(): string {
         .map((c, i) =>
           cardHTML(
             c,
-            `clickable ${c.id === selectedCardId ? 'selected' : ''} ${c.id === suggestedId ? 'suggest' : ''} ${starts.has(i) ? 'group-start' : ''}`,
-            `data-action="select-card" data-card-id="${c.id}" draggable="true"`,
+            `${canPick ? 'clickable' : ''} ${c.id === selectedCardId ? 'selected' : ''} ${c.id === suggestedId ? 'suggest' : ''} ${starts.has(i) ? 'group-start' : ''}`,
+            `data-action="select-card" data-card-id="${c.id}"`,
           ),
         )
         .join('')}
@@ -769,6 +761,7 @@ function render(): void {
   `;
   const log = document.getElementById('log');
   if (log) log.scrollTop = log.scrollHeight;
+  reattachDrag();
   if (tutorialStep !== null) {
     (document.getElementById('tutorial-dialog') as HTMLDialogElement | null)?.showModal();
   }
@@ -817,33 +810,112 @@ document.addEventListener(
   true,
 );
 
-// Drag-to-reorder the hand.
-let dragId: number | null = null;
-document.addEventListener('dragstart', (ev) => {
+// Drag-to-reorder the hand. Implemented with pointer events (not HTML5
+// drag-and-drop) so it works with both mouse and touch. A small horizontal
+// threshold separates drags from taps; vertical gestures stay free for
+// page scrolling on phones (touch-action: pan-y on the cards).
+interface DragState {
+  id: number;
+  startX: number;
+  startY: number;
+  pointerId: number;
+  el: HTMLElement;
+  active: boolean;
+  transform: string;
+}
+let drag: DragState | null = null;
+let suppressNextClick = false;
+
+function dropTargetAt(x: number, y: number): HTMLElement | null {
+  return (
+    (document
+      .elementsFromPoint(x, y)
+      .find(
+        (el) => el instanceof HTMLElement && el.matches('#hand .card') && el !== drag?.el,
+      ) as HTMLElement | undefined) ?? null
+  );
+}
+
+function clearDropMarkers(): void {
+  document.querySelectorAll('#hand .card.drop-before').forEach((el) => el.classList.remove('drop-before'));
+}
+
+document.addEventListener('pointerdown', (ev) => {
   const card = (ev.target as HTMLElement).closest<HTMLElement>('#hand .card');
-  if (!card) return;
-  dragId = Number(card.dataset.cardId);
-  card.classList.add('dragging');
-  ev.dataTransfer?.setData('text/plain', String(dragId));
+  if (!card || !ev.isPrimary) return;
+  drag = {
+    id: Number(card.dataset.cardId),
+    startX: ev.clientX,
+    startY: ev.clientY,
+    pointerId: ev.pointerId,
+    el: card,
+    active: false,
+    transform: '',
+  };
 });
-document.addEventListener('dragover', (ev) => {
-  if (dragId !== null && (ev.target as HTMLElement).closest('#hand')) ev.preventDefault();
-});
-document.addEventListener('drop', (ev) => {
-  if (dragId === null) return;
-  const hand = (ev.target as HTMLElement).closest('#hand');
-  if (!hand) return;
-  ev.preventDefault();
-  const targetCard = (ev.target as HTMLElement).closest<HTMLElement>('#hand .card');
-  const targetId = targetCard ? Number(targetCard.dataset.cardId) : null;
-  const id = dragId;
-  dragId = null;
-  if (targetId !== id) reorderManual(id, targetId);
-});
-document.addEventListener('dragend', () => {
-  dragId = null;
-  document.querySelector('#hand .card.dragging')?.classList.remove('dragging');
-});
+
+document.addEventListener(
+  'pointermove',
+  (ev) => {
+    if (!drag || ev.pointerId !== drag.pointerId) return;
+    const dx = ev.clientX - drag.startX;
+    const dy = ev.clientY - drag.startY;
+    if (!drag.active) {
+      if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy)) return;
+      drag.active = true;
+      drag.el.classList.add('dragging');
+    }
+    ev.preventDefault();
+    drag.transform = `translate(${dx}px, ${dy}px)`;
+    drag.el.style.transform = drag.transform;
+    clearDropMarkers();
+    dropTargetAt(ev.clientX, ev.clientY)?.classList.add('drop-before');
+  },
+  { passive: false },
+);
+
+function endDrag(ev: PointerEvent, apply: boolean): void {
+  if (!drag || ev.pointerId !== drag.pointerId) return;
+  const d = drag;
+  drag = null;
+  clearDropMarkers();
+  d.el.classList.remove('dragging');
+  d.el.style.transform = '';
+  if (!d.active) return;
+  // A click may fire right after pointerup (same task); swallow it, but clear
+  // the flag afterwards in case the browser doesn't dispatch one.
+  suppressNextClick = true;
+  setTimeout(() => {
+    suppressNextClick = false;
+  }, 0);
+  if (apply) {
+    const over = dropTargetAt(ev.clientX, ev.clientY);
+    const overHand = document.elementsFromPoint(ev.clientX, ev.clientY).some((el) => el.id === 'hand');
+    const targetId = over ? Number(over.dataset.cardId) : null;
+    if (over || overHand) reorderManual(d.id, targetId);
+    else render();
+  } else {
+    render();
+  }
+}
+
+document.addEventListener('pointerup', (ev) => endDrag(ev, true));
+document.addEventListener('pointercancel', (ev) => endDrag(ev, false));
+
+/** Keep an in-flight drag attached to the fresh DOM after a re-render. */
+function reattachDrag(): void {
+  if (!drag) return;
+  const el = document.querySelector<HTMLElement>(`#hand .card[data-card-id="${drag.id}"]`);
+  if (!el) {
+    drag = null;
+    return;
+  }
+  drag.el = el;
+  if (drag.active) {
+    el.classList.add('dragging');
+    el.style.transform = drag.transform;
+  }
+}
 
 document.addEventListener('click', (ev) => {
   const target = (ev.target as HTMLElement).closest<HTMLElement>('[data-action]');
@@ -970,23 +1042,17 @@ document.addEventListener('click', (ev) => {
       else render();
       break;
     case 'select-card': {
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        break;
+      }
+      if (state.phase.type !== 'discard' || state.phase.player !== mySeat) break;
       const id = Number(target.dataset.cardId);
-      const myDiscard = state.phase.type === 'discard' && state.phase.player === mySeat;
-      if (selectedCardId === null) {
+      if (selectedCardId === id) {
+        userAction({ type: 'discard', player: mySeat, cardId: id });
+      } else {
         selectedCardId = id;
         render();
-      } else if (selectedCardId === id) {
-        // Same card twice: discard on your turn, otherwise just deselect.
-        if (myDiscard) {
-          userAction({ type: 'discard', player: mySeat, cardId: id });
-        } else {
-          selectedCardId = null;
-          render();
-        }
-      } else {
-        const first = selectedCardId;
-        selectedCardId = null;
-        swapCards(first, id);
       }
       break;
     }
