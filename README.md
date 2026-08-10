@@ -184,6 +184,41 @@ Notes:
 - GitHub Pages on a **private** repository requires a paid GitHub plan; on a
   free plan, make the repository public to publish.
 
+## Error reporting & replay debugging
+
+The app records every uncaught error — and every action the engine rejects —
+to a local ring buffer, together with the context needed to reproduce the
+game: the deal **seed**, the **dealer**, and the full **action history** in a
+compact encoding (`src/core/replay.ts`). When something breaks, a toast
+offers **Report a problem** (also available from the Rules dialog), which
+opens a prefilled GitHub issue whose body contains the report as a fenced
+```json``` block. Reports contain no personal data and the player reviews
+the issue before submitting.
+
+Because the engine is a pure, seeded reducer, a report replays
+deterministically. To reproduce a reported bug:
+
+1. Open the issue, copy the JSON block to a file (say `report.json`).
+2. Run:
+
+   ```bash
+   REPLAY_REPORT=report.json npm test -- replay
+   ```
+
+   The replay test rebuilds the game from `seed`/`dealer`, applies `actions`,
+   and prints where the engine failed (`applied`, `failedAction`, `error`,
+   `finalPhase`) plus the error messages the player saw.
+
+Report schema (all on one object): `app`, `version`, `time`, `url`,
+`userAgent`, `mode` (solo/host/guest), `locale`, `seed`, `dealer`, `actions`
+(encoded history; empty for guests, who don't hold authoritative state),
+`historyComplete` (false if the tab restored mid-game), `phase`, and
+`errors[]` (`time`, `kind`, `message`, `stack`, `action`, `phase`).
+
+Maintainer loop (works for humans and for Claude Code): list open issues
+titled `[bug report]`, extract the JSON block, replay it, fix, and add the
+report as a regression test using `replay()` from `src/core/replay.ts`.
+
 ## Development
 
 ```bash

@@ -125,6 +125,16 @@ const en = {
   hostOnlyNewGame: 'Only the host can start the next round.',
   reconnecting: 'Connection lost — reconnecting…',
 
+  errorRecorded: 'Something went wrong — an error was recorded.',
+  reportProblem: 'Report a problem',
+  reportTitle: 'Report a problem',
+  reportIntro:
+    'This report contains the recorded errors plus the data needed to replay the game (deal seed and moves) — no personal information. Sending opens a prefilled GitHub issue you can review before submitting.',
+  errorsLogged: (n: number) => (n === 1 ? '1 error logged' : `${n} errors logged`),
+  sendGitHub: 'Send via GitHub',
+  copyReport: 'Copy report',
+  clearLog: 'Clear log',
+
   logLine(e: LogEvent, names: string[]): string {
     switch (e.type) {
       case 'new-game': return `New round — ${names[e.dealer]} deals.`;
@@ -277,6 +287,16 @@ const vi: typeof en = {
   onlineBadge: (code) => `Online · ${code}`,
   hostOnlyNewGame: 'Chỉ chủ phòng mới bắt đầu được ván mới.',
   reconnecting: 'Mất kết nối — đang kết nối lại…',
+
+  errorRecorded: 'Có lỗi xảy ra — đã ghi lại nhật ký lỗi.',
+  reportProblem: 'Báo lỗi',
+  reportTitle: 'Báo lỗi',
+  reportIntro:
+    'Báo cáo gồm các lỗi đã ghi và dữ liệu để phát lại ván bài (seed và các nước đi) — không có thông tin cá nhân. Nút gửi sẽ mở một issue GitHub điền sẵn để bạn xem lại trước khi gửi.',
+  errorsLogged: (n) => `Đã ghi ${n} lỗi`,
+  sendGitHub: 'Gửi qua GitHub',
+  copyReport: 'Chép báo cáo',
+  clearLog: 'Xóa nhật ký',
 
   logLine(e, names) {
     switch (e.type) {

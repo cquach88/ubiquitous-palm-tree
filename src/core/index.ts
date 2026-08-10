@@ -12,3 +12,4 @@ export * from './melds';
 export * from './scoring';
 export * from './engine';
 export * from './ai';
+export * from './replay';

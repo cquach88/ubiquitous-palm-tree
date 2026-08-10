@@ -16,6 +16,8 @@ import {
   aiChooseAction,
   applyAction,
   bestCoverGroups,
+  encodeAction,
+  encodeActions,
   kindName,
   kindOf,
   leftoverCount,
@@ -25,6 +27,15 @@ import {
   NUM_PLAYERS,
 } from '../core';
 import { cardHTML, kindCardHTML } from './cards';
+import type { ReportContext } from './errorlog';
+import {
+  clearErrors,
+  installGlobalHandlers,
+  issueURL,
+  loadErrors,
+  recordError,
+  reportJSON,
+} from './errorlog';
 import type { Locale } from './i18n';
 import { STR } from './i18n';
 import { tutorialSlides } from './tutorial';
@@ -154,6 +165,45 @@ let reconnecting = false;
 let reconnectTries = 0;
 const MAX_RECONNECT_TRIES = 20;
 
+// ---------- error logging ----------
+
+let gameSeed = 0;
+let gameDealer = 0;
+let actionHistory: Action[] = [];
+let historyComplete = true;
+let errorToast = false;
+let reportOpen = false;
+let reportCopied = false;
+
+function phaseLabelForLog(): string {
+  if (!state) return 'boot';
+  const p = state.phase;
+  return p.type === 'finished' ? `finished ${p.winner ?? 'draw'}` : `${p.type} p${p.player}`;
+}
+
+function reportContext(): ReportContext {
+  return {
+    mode: netMode,
+    locale,
+    seed: gameSeed,
+    dealer: gameDealer,
+    actions: netMode === 'guest' ? '' : encodeActions(actionHistory),
+    historyComplete: netMode !== 'guest' && historyComplete,
+    phase: phaseLabelForLog(),
+  };
+}
+
+/** Apply an action from the local user or a bot; log engine rejections. */
+function safeDispatch(action: Action): void {
+  try {
+    dispatch(action);
+  } catch (err) {
+    recordError('action', err, { action: encodeAction(action), phase: phaseLabelForLog() });
+    errorToast = true;
+    render();
+  }
+}
+
 function clearOnlineSession(): void {
   ssDel('tusac-online');
   ssDel('tusac-hostgame');
@@ -204,7 +254,11 @@ function startGame(): void {
   selectedCardId = null;
   settled = false;
   manualOrder = [];
-  state = newGame({ seed: (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0, dealer });
+  gameSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+  gameDealer = dealer;
+  actionHistory = [];
+  historyComplete = true;
+  state = newGame({ seed: gameSeed, dealer });
   render();
   afterAction();
 }
@@ -217,11 +271,12 @@ function userAction(action: Action): void {
     render();
     return;
   }
-  dispatch(action);
+  safeDispatch(action);
 }
 
 function dispatch(action: Action): void {
   state = applyAction(state, action);
+  actionHistory.push(action);
   if (state.phase.type === 'finished') {
     onFinished();
     return;
@@ -242,7 +297,13 @@ function afterAction(): void {
     const gen = ++aiTimerGen;
     setTimeout(() => {
       if (gen !== aiTimerGen || state.phase.type === 'finished') return;
-      dispatch(aiChooseAction(state));
+      try {
+        safeDispatch(aiChooseAction(state));
+      } catch (err) {
+        recordError('action', err, { phase: phaseLabelForLog() });
+        errorToast = true;
+        render();
+      }
     }, SPEED_MS[speed]);
   }
 }
@@ -508,6 +569,10 @@ function tryRestoreOnline(): boolean {
   chips = snap.chips;
   settled = snap.settled;
   state = snap.state;
+  gameSeed = state.seed;
+  gameDealer = state.dealer;
+  actionHistory = [];
+  historyComplete = false; // history from before the refresh is gone
   netError = '';
   onlineView = mpStarted ? null : 'hostLobby';
   // Guests' connections died with the old tab; they will reconnect with
@@ -924,7 +989,37 @@ function helpDialogHTML(): string {
   return `<dialog id="help-dialog">
     ${t().rulesHTML}
     <div class="dialog-actions">
+      <button data-action="open-report">${t().reportProblem}</button>
       <button class="primary" data-action="close-dialog">${locale === 'vi' ? 'Đóng' : 'Close'}</button>
+    </div>
+  </dialog>`;
+}
+
+function errorToastHTML(): string {
+  if (!errorToast) return '';
+  return `<div class="toast">
+    <span>⚠ ${t().errorRecorded}</span>
+    <button class="tiny" data-action="open-report">${t().reportProblem}</button>
+    <button class="tiny" data-action="dismiss-error">✕</button>
+  </div>`;
+}
+
+function reportDialogHTML(): string {
+  if (!reportOpen) return '';
+  const s = t();
+  const ctx = reportContext();
+  const errors = loadErrors();
+  const last = errors[errors.length - 1];
+  return `<dialog id="report-dialog">
+    <h2>${s.reportTitle}</h2>
+    <p>${s.reportIntro}</p>
+    <p><strong>${s.errorsLogged(errors.length)}</strong>${last ? ` — <code>${last.message.slice(0, 120)}</code>` : ''}</p>
+    <textarea class="report-json" readonly rows="8">${reportJSON(ctx).replace(/</g, '&lt;')}</textarea>
+    <div class="dialog-actions">
+      <button data-action="clear-errors">${s.clearLog}</button>
+      <button data-action="copy-report">${reportCopied ? s.copied : s.copyReport}</button>
+      <a class="btn-link primary" href="${issueURL(ctx)}" target="_blank" rel="noreferrer">${s.sendGitHub}</a>
+      <button data-action="close-dialog">${locale === 'vi' ? 'Đóng' : 'Close'}</button>
     </div>
   </dialog>`;
 }
@@ -962,6 +1057,8 @@ function render(): void {
     ${tutorialDialogHTML()}
     ${onlineDialogHTML()}
     ${nameDialogHTML()}
+    ${reportDialogHTML()}
+    ${errorToastHTML()}
   `;
   const log = document.getElementById('log');
   if (log) log.scrollTop = log.scrollHeight;
@@ -974,6 +1071,9 @@ function render(): void {
   }
   if (nameDialogOpen) {
     (document.getElementById('name-dialog') as HTMLDialogElement | null)?.showModal();
+  }
+  if (reportOpen) {
+    (document.getElementById('report-dialog') as HTMLDialogElement | null)?.showModal();
   }
 }
 
@@ -1006,6 +1106,7 @@ document.addEventListener(
     const id = (ev.target as HTMLElement).id;
     if (id === 'online-dialog') onlineView = null;
     if (id === 'name-dialog') nameDialogOpen = false;
+    if (id === 'report-dialog') reportOpen = false;
     if (id === 'tutorial-dialog' && tutorialStep !== null) {
       tutorialStep = null;
       saveJSON('tusac-tutorial-seen', true);
@@ -1133,6 +1234,34 @@ document.addEventListener('click', (ev) => {
       break;
     case 'help':
       (document.getElementById('help-dialog') as HTMLDialogElement | null)?.showModal();
+      break;
+    case 'open-report':
+      target.closest('dialog')?.close();
+      errorToast = false;
+      reportOpen = true;
+      reportCopied = false;
+      render();
+      break;
+    case 'dismiss-error':
+      errorToast = false;
+      render();
+      break;
+    case 'copy-report':
+      navigator.clipboard?.writeText(reportJSON(reportContext())).then(
+        () => {
+          reportCopied = true;
+          render();
+          setTimeout(() => {
+            reportCopied = false;
+            render();
+          }, 1500);
+        },
+        () => {},
+      );
+      break;
+    case 'clear-errors':
+      clearErrors();
+      render();
       break;
     case 'close-dialog':
       target.closest('dialog')?.close();
@@ -1278,6 +1407,11 @@ document.addEventListener('click', (ev) => {
       break;
   }
 });
+
+installGlobalHandlers(() => {
+  errorToast = true;
+  render();
+}, phaseLabelForLog);
 
 if (!tryRestoreOnline()) {
   startGame();
