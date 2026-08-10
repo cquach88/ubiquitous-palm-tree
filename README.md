@@ -1,12 +1,22 @@
 # Bài Tứ Sắc
 
 A browser-playable implementation of **Tứ Sắc** (Four-Color Cards), the Vietnamese
-climbing/melding card game — you against three AI opponents, with a fully
-portable rules engine designed to be reused on iOS and Android.
+melding card game — you against three AI opponents, with a fully portable rules
+engine designed to be reused on iOS and Android.
+
+The UI defaults to **English** (toggle to Tiếng Việt in the header); cards always
+show their Chinese character and Vietnamese name, with the suit as the card's
+background color. A built-in **tutorial** teaches the rules and can start a
+practice game with per-turn hints from a coach.
 
 ![Gameplay screenshot](docs/screenshot.png)
 
 ## Play it
+
+Deployed via GitHub Pages (see below):
+**https://cquach88.github.io/ubiquitous-palm-tree/**
+
+Or run locally:
 
 ```bash
 npm install
@@ -20,8 +30,18 @@ npm run build      # outputs dist/ — plain static files, relative paths
 npm run preview    # serve the production build locally
 ```
 
-The UI is in Vietnamese and works with mouse or touch; it is responsive down to
-phone-sized screens. Session scores persist in `localStorage`.
+The UI works with mouse or touch and is responsive down to phone-sized screens.
+Session scores, language, and hint preferences persist in `localStorage`.
+
+## Tutorial mode
+
+The **Tutorial** button (auto-opened on first visit) walks through the deck, the
+valid groups, the turn flow, and scoring with rendered example cards — in either
+language. Its last step starts a **practice game with hints on**: every turn the
+coach highlights a suggested move (discard, capture, or pass) and explains it in
+one line. Hints can be toggled any time with the 🎓 button.
+
+![Tutorial screenshot](docs/tutorial.png)
 
 ## The game
 
@@ -76,14 +96,18 @@ src/
 │   └── index.ts   public API surface
 └── web/           ← thin browser layer (DOM + CSS only)
     ├── main.ts    renders GameState, dispatches Actions, paces the AI
+    ├── cards.ts   card face rendering
+    ├── i18n.ts    UI strings (English default, Vietnamese toggle)
+    ├── tutorial.ts illustrated rule walkthrough
     └── style.css
 ```
 
 The core is a **pure reducer**: `newGame({seed})` produces a `GameState`, and
 `applyAction(state, action)` returns the next state without mutating the input.
 There are no timers, no randomness outside the seeded deal, no DOM, no Node
-APIs — `src/core` compiles anywhere TypeScript runs. The entire contract
-between UI and rules is:
+APIs — `src/core` compiles anywhere TypeScript runs. The engine's game log is a
+list of structured events (not strings), so each UI localizes them however it
+likes. The entire contract between UI and rules is:
 
 ```ts
 let state = newGame({ seed });
@@ -116,6 +140,20 @@ Two natural paths, in increasing order of effort:
    logic, AI, and scoring come along unchanged, and the vitest suite keeps
    guarding them. The same core would also drop into a server for online
    multiplayer, since games are deterministic given a seed and action list.
+
+## Deployment (GitHub Pages)
+
+`.github/workflows/deploy.yml` builds, tests, and publishes `dist/` to GitHub
+Pages on every push to `main` (and to the development branch), or on demand via
+*Actions → Deploy to GitHub Pages → Run workflow*. The site URL is
+`https://<owner>.github.io/ubiquitous-palm-tree/`.
+
+Notes:
+
+- If the first run fails at the *configure-pages* step, enable Pages once by
+  hand: **Settings → Pages → Source: GitHub Actions**, then re-run.
+- GitHub Pages on a **private** repository requires a paid GitHub plan; on a
+  free plan, make the repository public to publish.
 
 ## Development
 

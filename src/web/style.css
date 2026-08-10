@@ -175,7 +175,7 @@ button.primary:hover {
 .card {
   width: var(--card-w);
   height: var(--card-h);
-  background: var(--ivory);
+  background: var(--bg, var(--ivory));
   border-radius: 6px;
   border: 1px solid rgb(0 0 0 / 35%);
   box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
@@ -192,31 +192,23 @@ button.primary:hover {
 .card .glyph {
   font-size: calc(var(--card-w) * 0.58);
   line-height: 1;
-  color: var(--c, var(--ink));
+  color: #191919;
   font-weight: 700;
 }
 
 .card .label {
   font-size: calc(var(--card-w) * 0.2);
-  color: var(--c, var(--ink));
+  color: #191919;
   font-weight: 600;
   letter-spacing: -0.02em;
+  text-align: center;
 }
 
-.card::before {
-  content: '';
-  position: absolute;
-  inset: 3px auto auto 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--c, var(--ink));
-}
-
-.card.red { --c: #bb2418; }
-.card.green { --c: #1a7a43; }
-.card.yellow { --c: #b8860b; }
-.card.white { --c: #4a5568; background: #fff; }
+/* Suit = card background color; text stays black. */
+.card.red { --bg: #e98873; }
+.card.green { --bg: #85c58c; }
+.card.yellow { --bg: #eecf62; }
+.card.white { --bg: #f8f4e9; }
 
 .card.mini {
   width: var(--mini-w);
@@ -226,7 +218,6 @@ button.primary:hover {
 
 .card.mini .glyph { font-size: calc(var(--mini-w) * 0.62); }
 .card.mini .label { display: none; }
-.card.mini::before { width: 4px; height: 4px; }
 
 .card.back {
   background: repeating-linear-gradient(45deg, #7a1f1f 0 6px, #6a1919 6px 12px);
@@ -235,20 +226,40 @@ button.primary:hover {
 
 .card.back .glyph,
 .card.back .label { display: none; }
-.card.back::before { display: none; }
 
 .card.clickable { cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
 .card.clickable:hover { transform: translateY(-6px); box-shadow: 0 6px 10px rgb(0 0 0 / 45%); }
 
 .card.selected {
   transform: translateY(-10px);
-  outline: 3px solid var(--accent);
+  outline: 3px solid #fff;
   outline-offset: 1px;
 }
 
 .card.offered-big {
-  outline: 3px solid var(--accent);
-  box-shadow: 0 0 18px rgb(240 192 0 / 60%);
+  outline: 3px solid #fff;
+  box-shadow: 0 0 18px rgb(255 255 255 / 55%);
+}
+
+/* Coach-mode suggestion highlight */
+.card.suggest,
+button.suggest {
+  outline: 3px dashed #fff;
+  outline-offset: 2px;
+  animation: coach-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes coach-pulse {
+  0%, 100% { outline-color: rgb(255 255 255 / 95%); }
+  50% { outline-color: rgb(255 255 255 / 30%); }
+}
+
+.hint-bar {
+  background: rgb(240 192 0 / 14%);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
 }
 
 .backs {
@@ -398,6 +409,47 @@ dialog button.primary { background: var(--accent); color: #3a2c00; }
 .score-table tr.total td { border-top: 2px solid #b9a76a; font-weight: 700; }
 
 .result-cards { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0; }
+
+/* ---------- tutorial ---------- */
+.tut-progress {
+  font-size: 0.75rem;
+  font-weight: 400;
+  opacity: 0.55;
+  margin-left: 6px;
+}
+
+.tut-cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-weight: 700;
+}
+
+.tut-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: #ece2c8;
+  border-radius: 6px;
+}
+
+.tut-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.tut-dots .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d5c9a8;
+}
+
+.tut-dots .dot.on { background: #8a6d1d; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 760px) {

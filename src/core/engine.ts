@@ -19,7 +19,7 @@
  */
 
 import type { Card } from './types';
-import { buildDeck, toCounts, kindOf, cardName } from './types';
+import { buildDeck, toCounts, kindOf } from './types';
 import { mulberry32, shuffle } from './rng';
 import type { EatOption, MeldKind } from './melds';
 import { eatOptions, fullyDecomposes, winsWith } from './melds';
@@ -41,6 +41,20 @@ export interface PlayerState {
   melds: ExposedMeld[];
 }
 
+/**
+ * Locale-independent record of what happened. UIs format these into
+ * human-readable text in whatever language they present.
+ */
+export type LogEvent =
+  | { type: 'new-game'; dealer: number }
+  | { type: 'dealt-win'; player: number }
+  | { type: 'discard'; player: number; kind: number }
+  | { type: 'draw'; player: number; kind: number } // flipped from the wall
+  | { type: 'relay'; player: number; kind: number } // declined a wall card
+  | { type: 'eat'; player: number; kind: number; meld: MeldKind }
+  | { type: 'win'; player: number; kind: number; lenh: number }
+  | { type: 'wall-empty' };
+
 export type Phase =
   | { type: 'discard'; player: number }
   | { type: 'respond'; player: number; source: Source; offerId: number }
@@ -61,7 +75,7 @@ export interface GameState {
   /** The card currently on offer (during 'respond'), or null. */
   offered: Card | null;
   phase: Phase;
-  log: string[];
+  log: LogEvent[];
   offerCounter: number;
 }
 
@@ -69,19 +83,6 @@ export type Action =
   | { type: 'discard'; player: number; cardId: number }
   | { type: 'eat'; player: number; option: EatOption }
   | { type: 'pass'; player: number };
-
-export interface PlayerNames {
-  (player: number): string;
-}
-
-const defaultName: PlayerNames = (p) => `P${p}`;
-
-let names: PlayerNames = defaultName;
-
-/** Configure display names used in the engine's log lines. */
-export function setLogNames(fn: PlayerNames): void {
-  names = fn;
-}
 
 export function nextPlayer(p: number): number {
   return (p + 1) % NUM_PLAYERS;
@@ -109,13 +110,13 @@ export function newGame(opts: { seed: number; dealer?: number }): GameState {
     dead: [],
     offered: null,
     phase: { type: 'discard', player: dealer },
-    log: [`Ván mới — ${names(dealer)} làm cái.`],
+    log: [{ type: 'new-game', dealer }],
     offerCounter: 0,
   };
 
   // Thiên tới: the dealer's 21 dealt cards already form a winning hand.
   if (fullyDecomposes(toCounts(players[dealer].hand))) {
-    state.log.push(`${names(dealer)} tới ngay khi chia bài (thiên tới)!`);
+    state.log.push({ type: 'dealt-win', player: dealer });
     state.phase = {
       type: 'finished',
       winner: dealer,
@@ -161,7 +162,7 @@ function doDiscard(state: GameState, player: number, cardId: number): GameState 
   const idx = hand.findIndex((c) => c.id === cardId);
   if (idx < 0) throw new Error('Card not in hand');
   const [card] = hand.splice(idx, 1);
-  state.log.push(`${names(player)} đánh ${cardName(card)}.`);
+  state.log.push({ type: 'discard', player, kind: kindOf(card) });
   return offerCard(state, card, nextPlayer(player), 'discard');
 }
 
@@ -189,7 +190,7 @@ function doEat(state: GameState, player: number, option: EatOption): GameState {
   }
   state.players[player].melds.push({ kind: match.kind, cards: sortHand(taken) });
   state.offered = null;
-  state.log.push(`${names(player)} ăn ${cardName(offered)}.`);
+  state.log.push({ type: 'eat', player, kind: kindOf(offered), meld: match.kind });
   state.phase = { type: 'discard', player };
   return state;
 }
@@ -207,17 +208,17 @@ function doPass(state: GameState, player: number): GameState {
     // Burn the offered card, then flip the wall for this same player.
     state.dead.push(offered);
     if (state.wall.length === 0) {
-      state.log.push('Hết nọc — ván hòa.');
+      state.log.push({ type: 'wall-empty' });
       state.phase = { type: 'finished', winner: null, score: null, reason: 'wall-empty' };
       return state;
     }
     const flip = state.wall.shift()!;
-    state.log.push(`${names(player)} bốc nọc: ${cardName(flip)}.`);
+    state.log.push({ type: 'draw', player, kind: kindOf(flip) });
     return offerCard(state, flip, player, 'wall');
   }
 
   // Passing a wall card relays it to the next player as a normal offer.
-  state.log.push(`${names(player)} không ăn, nhường ${cardName(offered)}.`);
+  state.log.push({ type: 'relay', player, kind: kindOf(offered) });
   return offerCard(state, offered, nextPlayer(player), 'discard');
 }
 
@@ -240,7 +241,7 @@ function offerCard(state: GameState, card: Card, toPlayer: number, source: Sourc
         uses: m.cards.map(kindOf),
       }));
       const score = scoreWin(p, exposed, handCounts, kind);
-      state.log.push(`${names(p)} TỚI với ${cardName(card)} — ${score.lenh} lệnh!`);
+      state.log.push({ type: 'win', player: p, kind, lenh: score.lenh });
       state.phase = { type: 'finished', winner: p, score, reason: 'win' };
       return state;
     }

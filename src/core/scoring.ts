@@ -16,7 +16,7 @@
  */
 
 import type { MeldKind, MeldShape } from './melds';
-import { NUM_KINDS, kindName, rankOfKind, colorOfKind, COLOR_INFO, RANK_INFO } from './types';
+import { NUM_KINDS } from './types';
 
 export const WIN_BONUS = 3;
 
@@ -36,7 +36,6 @@ export interface ScoredMeld {
   uses: number[];
   concealed: boolean;
   lenh: number;
-  label: string;
 }
 
 export interface ScoreResult {
@@ -44,27 +43,6 @@ export interface ScoreResult {
   lenh: number;
   breakdown: ScoredMeld[];
   winBonus: number;
-}
-
-export function meldLabel(kind: MeldKind, uses: number[]): string {
-  switch (kind) {
-    case 'pair':
-      return `Đôi ${kindName(uses[0])}`;
-    case 'triple':
-      return `Ba ${kindName(uses[0])}`;
-    case 'quad':
-      return `Quằn ${kindName(uses[0])}`;
-    case 'tst':
-      return `Tướng-Sĩ-Tượng ${COLOR_INFO[colorOfKind(uses[0])].vi}`;
-    case 'xpm':
-      return `Xe-Pháo-Mã ${COLOR_INFO[colorOfKind(uses[0])].vi}`;
-    case 'pawns3':
-      return '3 Tốt khác màu';
-    case 'pawns4':
-      return '4 Tốt khác màu';
-    case 'loneGeneral':
-      return `${RANK_INFO[rankOfKind(uses[0])].vi} lẻ ${COLOR_INFO[colorOfKind(uses[0])].vi}`;
-  }
 }
 
 interface DecompResult {
@@ -162,7 +140,6 @@ export function scoreWin(
       uses: m.uses,
       concealed: false,
       lenh: MELD_LENH[m.kind].exposed,
-      label: meldLabel(m.kind, m.uses),
     });
   }
 
@@ -193,7 +170,6 @@ export function scoreWin(
       uses: m.uses,
       concealed,
       lenh: concealed ? MELD_LENH[m.kind].concealed : MELD_LENH[m.kind].exposed,
-      label: meldLabel(m.kind, m.uses),
     });
   });
 
