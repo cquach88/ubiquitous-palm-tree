@@ -4,7 +4,7 @@
  * The lệnh table used here (a common variant — see README for notes):
  *   Đôi (pair)                       0 lệnh
  *   Tướng lẻ (lone general)          1
- *   Tướng-Sĩ-Tượng / Xe-Pháo-Mã      1
+ *   Tướng-Sĩ-Tượng / Xe-Pháo-Ngựa      1
  *   3 Tốt khác màu                   1
  *   4 Tốt khác màu                   4
  *   3 con giống — ăn/lộ (exposed)    1

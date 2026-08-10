@@ -60,7 +60,7 @@ const en = {
     triple: 'Three alike',
     quad: 'Quằn (4 alike)',
     tst: 'Tướng-Sĩ-Tượng',
-    xpm: 'Xe-Pháo-Mã',
+    xpm: 'Xe-Pháo-Ngựa',
     pawns3: 'Mixed Tốt',
     pawns4: 'Mixed Tốt ×4',
     loneGeneral: 'Lone Tướng',
@@ -72,7 +72,7 @@ const en = {
       case 'triple': return `Three ${kindName(uses[0])}`;
       case 'quad': return `Quằn — four ${kindName(uses[0])}`;
       case 'tst': return `Tướng-Sĩ-Tượng (${meldColorVi(uses)})`;
-      case 'xpm': return `Xe-Pháo-Mã (${meldColorVi(uses)})`;
+      case 'xpm': return `Xe-Pháo-Ngựa (${meldColorVi(uses)})`;
       case 'pawns3': return '3 Tốt, different colors';
       case 'pawns4': return '4 Tốt, different colors';
       case 'loneGeneral': return `Lone Tướng (${meldColorVi(uses)})`;
@@ -137,13 +137,13 @@ const en = {
 
   rulesHTML: `
     <h2>How to play (short version)</h2>
-    <p>The deck has 112 cards: 7 ranks (Tướng, Sĩ, Tượng, Xe, Pháo, Mã, Tốt) in
+    <p>The deck has 112 cards: 7 ranks (Tướng, Sĩ, Tượng, Xe, Pháo, Ngựa, Tốt) in
     4 colors, 4 copies each. The dealer gets 21 cards, everyone else 20. The
     goal: arrange <em>all</em> of your cards into valid groups.</p>
     <h3>Valid groups</h3>
     <ul>
       <li>2 / 3 / 4 identical cards (same rank <em>and</em> color)</li>
-      <li>Tướng-Sĩ-Tượng of one color · Xe-Pháo-Mã of one color</li>
+      <li>Tướng-Sĩ-Tượng of one color · Xe-Pháo-Ngựa of one color</li>
       <li>3 or 4 Tốt (soldiers), all different colors</li>
       <li>A lone Tướng (general) counts as a group by itself</li>
     </ul>
@@ -212,7 +212,7 @@ const vi: typeof en = {
     triple: 'Ăn ba',
     quad: 'Quằn',
     tst: 'Tướng-Sĩ-Tượng',
-    xpm: 'Xe-Pháo-Mã',
+    xpm: 'Xe-Pháo-Ngựa',
     pawns3: 'Tốt khác màu',
     pawns4: 'Tốt khác màu ×4',
     loneGeneral: 'Tướng lẻ',
@@ -224,7 +224,7 @@ const vi: typeof en = {
       case 'triple': return `Ba ${kindName(uses[0])}`;
       case 'quad': return `Quằn ${kindName(uses[0])}`;
       case 'tst': return `Tướng-Sĩ-Tượng ${meldColorVi(uses)}`;
-      case 'xpm': return `Xe-Pháo-Mã ${meldColorVi(uses)}`;
+      case 'xpm': return `Xe-Pháo-Ngựa ${meldColorVi(uses)}`;
       case 'pawns3': return '3 Tốt khác màu';
       case 'pawns4': return '4 Tốt khác màu';
       case 'loneGeneral': return `Tướng lẻ ${meldColorVi(uses)}`;
@@ -286,12 +286,12 @@ const vi: typeof en = {
 
   rulesHTML: `
     <h2>Luật chơi (bản rút gọn)</h2>
-    <p>Bộ bài 112 lá: 7 quân (Tướng, Sĩ, Tượng, Xe, Pháo, Mã, Tốt) × 4 màu × 4 lá.
+    <p>Bộ bài 112 lá: 7 quân (Tướng, Sĩ, Tượng, Xe, Pháo, Ngựa, Tốt) × 4 màu × 4 lá.
     Nhà cái nhận 21 lá, ba nhà kia 20 lá. Mục tiêu: sắp toàn bộ bài thành các nhóm hợp lệ.</p>
     <h3>Nhóm hợp lệ</h3>
     <ul>
       <li>Đôi / ba / bốn lá giống hệt nhau (cùng quân, cùng màu)</li>
-      <li>Tướng-Sĩ-Tượng cùng màu · Xe-Pháo-Mã cùng màu</li>
+      <li>Tướng-Sĩ-Tượng cùng màu · Xe-Pháo-Ngựa cùng màu</li>
       <li>3 hoặc 4 Tốt khác màu nhau</li>
       <li>Tướng lẻ một lá vẫn tính là một nhóm</li>
     </ul>

@@ -80,7 +80,7 @@ export function tutorialSlides(locale: Locale): Slide[] {
       {
         title: 'Nhóm lẻ',
         body: `<p>Các bộ khác màu sắc: <strong>Tướng-Sĩ-Tượng</strong> cùng màu,
-        <strong>Xe-Pháo-Mã</strong> cùng màu, <strong>3–4 Tốt khác màu</strong>,
+        <strong>Xe-Pháo-Ngựa</strong> cùng màu, <strong>3–4 Tốt khác màu</strong>,
         và <strong>Tướng lẻ</strong> một mình cũng là một nhóm.</p>${oddGroups}`,
       },
       {
@@ -133,7 +133,7 @@ export function tutorialSlides(locale: Locale): Slide[] {
     {
       title: 'Groups: runs & soldiers',
       body: `<p>Mixed groups: <strong>Tướng-Sĩ-Tượng</strong> (General-Advisor-Elephant) of one
-      color, <strong>Xe-Pháo-Mã</strong> (Chariot-Cannon-Horse) of one color,
+      color, <strong>Xe-Pháo-Ngựa</strong> (Chariot-Cannon-Horse) of one color,
       <strong>3–4 Tốt (soldiers) of different colors</strong> — and a
       <strong>lone Tướng</strong> counts as a group by itself.</p>${oddGroups}`,
     },

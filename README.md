@@ -71,8 +71,8 @@ one line. Hints can be toggled any time with the 🎓 button.
 
 ## The game
 
-The deck has **112 cards**: 7 ranks (Tướng 將, Sĩ 士, Tượng 象, Xe 車, Pháo 砲,
-Mã 馬, Tốt 卒) × 4 colors (đỏ/red, xanh/green, vàng/yellow, trắng/white) × 4
+The deck has **112 cards**: 7 ranks (Tướng 將, Sĩ 士, Tượng 相, Xe 車, Pháo 炮,
+Ngựa 馬, Tốt 卒) × 4 colors (đỏ/red, xanh/green, vàng/yellow, trắng/white) × 4
 copies. The dealer gets 21 cards, everyone else 20. The goal is to arrange your
 entire hand into valid groups ("bộ"):
 
@@ -80,7 +80,7 @@ entire hand into valid groups ("bộ"):
 | --- | --- |
 | Đôi / ba / quằn | 2 / 3 / 4 identical cards (same rank **and** color) |
 | Tướng-Sĩ-Tượng | one of each, same color |
-| Xe-Pháo-Mã | one of each, same color |
+| Xe-Pháo-Ngựa | one of each, same color |
 | Tốt khác màu | 3 or 4 pawns, all different colors |
 | Tướng lẻ | a lone General stands on its own |
 

@@ -8,7 +8,7 @@
  *  - Khạp / ba con:  3 identical cards
  *  - Quằn:           4 identical cards
  *  - Tướng-Sĩ-Tượng: one of each, all the same color
- *  - Xe-Pháo-Mã:     one of each, all the same color
+ *  - Xe-Pháo-Ngựa:     one of each, all the same color
  *  - Tốt khác màu:   3 or 4 pawns, all different colors
  *  - Tướng lẻ:       a lone General is a valid unit by itself
  */
@@ -21,7 +21,7 @@ export type MeldKind =
   | 'triple'
   | 'quad'
   | 'tst' // Tướng-Sĩ-Tượng, same color
-  | 'xpm' // Xe-Pháo-Mã, same color
+  | 'xpm' // Xe-Pháo-Ngựa, same color
   | 'pawns3' // 3 pawns, distinct colors
   | 'pawns4' // 4 pawns, distinct colors
   | 'loneGeneral';

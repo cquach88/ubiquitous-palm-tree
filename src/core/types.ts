@@ -68,10 +68,10 @@ export interface RankInfo {
 export const RANK_INFO: Record<Rank, RankInfo> = {
   general: { vi: 'Tướng', en: 'General', glyph: '將' },
   advisor: { vi: 'Sĩ', en: 'Advisor', glyph: '士' },
-  elephant: { vi: 'Tượng', en: 'Elephant', glyph: '象' },
+  elephant: { vi: 'Tượng', en: 'Elephant', glyph: '相' },
   chariot: { vi: 'Xe', en: 'Chariot', glyph: '車' },
-  cannon: { vi: 'Pháo', en: 'Cannon', glyph: '砲' },
-  horse: { vi: 'Mã', en: 'Horse', glyph: '馬' },
+  cannon: { vi: 'Pháo', en: 'Cannon', glyph: '炮' },
+  horse: { vi: 'Ngựa', en: 'Horse', glyph: '馬' },
   pawn: { vi: 'Tốt', en: 'Soldier', glyph: '卒' },
 };
 
