@@ -31,7 +31,33 @@ npm run preview    # serve the production build locally
 ```
 
 The UI works with mouse or touch and is responsive down to phone-sized screens.
-Session scores, language, and hint preferences persist in `localStorage`.
+Session scores, language, name, speed, sort, and hint preferences persist in
+`localStorage`.
+
+- **Hand sorting** — drag cards to arrange your hand yourself, or use the
+  sort chip to cycle auto-sort modes: by rank, by color, or by melds (groups
+  complete/partial sets together with a gap before the leftovers). Dragging
+  switches to manual mode automatically.
+- **Game speed** — cycle 🐢 Slow / ▶ Normal / ⏩ Fast to control how quickly the
+  bots act, so you can follow every capture and discard.
+- **Your name** — click the ✎ next to your seat to set a display name; it's
+  used at the table, in the log, and online.
+
+## Online multiplayer
+
+Click **Play online** → *Host a game* to get a 6-letter game code; friends
+choose *Join a game* and enter the same code. Up to 4 players — empty seats
+are played by bots, and a player who drops mid-game is taken over by a bot.
+Only the host can start rounds.
+
+How it works: connections are peer-to-peer WebRTC data channels (PeerJS, using
+its free public signaling cloud), so no game server is needed and it works
+from the static GitHub Pages deployment. The host is authoritative — it runs
+the engine from `src/core` and broadcasts each guest a **redacted** view
+(your own hand is real; other hands and the wall are dummies), so clients
+cannot peek. Guests send actions; the host validates them against the engine
+before applying. For local development, `?peer=localhost:9099` in the URL
+points the client at a local PeerServer (`node_modules/.bin/peerjs --port 9099`).
 
 ## Tutorial mode
 
@@ -99,6 +125,7 @@ src/
     ├── cards.ts   card face rendering
     ├── i18n.ts    UI strings (English default, Vietnamese toggle)
     ├── tutorial.ts illustrated rule walkthrough
+    ├── net.ts     online play: PeerJS transport + state redaction
     └── style.css
 ```
 

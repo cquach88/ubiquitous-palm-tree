@@ -90,6 +90,17 @@ button.primary:hover {
   background: #ffd42a;
 }
 
+button.tiny {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+button.online-active {
+  border-color: #7fe0a0;
+  color: #9fe6a0;
+}
+
 /* ---------- table layout ---------- */
 .table {
   flex: 1;
@@ -141,6 +152,12 @@ button.primary:hover {
   background: var(--accent);
   color: #3a2c00;
   font-weight: 700;
+}
+
+.badge.net {
+  background: transparent;
+  color: #7fe0a0;
+  padding: 0;
 }
 
 .chips {
@@ -335,6 +352,12 @@ button.suggest {
   gap: 4px;
 }
 
+.hand .card { cursor: grab; }
+
+.hand .card.dragging { opacity: 0.4; }
+
+.hand .card.group-start { margin-left: calc(var(--card-w) * 0.3); }
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -450,6 +473,66 @@ dialog button.primary { background: var(--accent); color: #3a2c00; }
 }
 
 .tut-dots .dot.on { background: #8a6d1d; }
+
+/* ---------- online play ---------- */
+.online-menu {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.net-error {
+  color: #a33326;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.game-code {
+  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  background: #efe6cd;
+  border: 1px dashed #b9a76a;
+  border-radius: 8px;
+  padding: 4px 12px;
+}
+
+.lobby-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+
+.lobby-list li {
+  padding: 4px 8px;
+  border-bottom: 1px solid #e0d5b8;
+  font-size: 0.9rem;
+}
+
+.lobby-list li.empty { opacity: 0.5; font-style: italic; }
+
+dialog input {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid #b9a76a;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  width: 100%;
+  max-width: 260px;
+  margin-top: 4px;
+  text-transform: none;
+}
+
+#join-code { text-transform: uppercase; letter-spacing: 0.2em; font-family: ui-monospace, monospace; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 760px) {

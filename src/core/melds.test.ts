@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bestCover,
+  bestCoverGroups,
   eatOptions,
   fullyDecomposes,
   leftoverCount,
@@ -111,6 +112,33 @@ describe('bestCover / leftoverCount', () => {
   });
   it('treats a lone general as covered', () => {
     expect(leftoverCount(counts(K('general', 'green')))).toBe(0);
+  });
+});
+
+describe('bestCoverGroups', () => {
+  it('returns a grouping matching bestCover, with leftovers listed', () => {
+    const c = counts(
+      K('chariot', 'red'), K('chariot', 'red'),
+      K('cannon', 'red'), K('horse', 'red'),
+      K('advisor', 'yellow'),
+    );
+    const g = bestCoverGroups(c);
+    expect(g.covered).toBe(bestCover(c));
+    expect(g.covered).toBe(3); // Xe-Pháo-Mã run
+    const meldCards = g.melds.reduce((s, m) => s + m.uses.length, 0);
+    expect(meldCards).toBe(g.covered);
+    expect(g.leftovers.length).toBe(2); // spare Xe + lone Sĩ
+    expect(g.leftovers).toContain(K('chariot', 'red'));
+    expect(g.leftovers).toContain(K('advisor', 'yellow'));
+  });
+  it('covers a fully-decomposable hand completely', () => {
+    const c = counts(
+      K('general', 'red'), K('advisor', 'red'), K('elephant', 'red'),
+      K('pawn', 'red'), K('pawn', 'green'), K('pawn', 'white'),
+    );
+    const g = bestCoverGroups(c);
+    expect(g.covered).toBe(6);
+    expect(g.leftovers).toEqual([]);
   });
 });
 

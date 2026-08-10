@@ -134,6 +134,51 @@ export function bestCover(countsIn: readonly number[]): number {
   return rec();
 }
 
+export interface CoverGroups {
+  covered: number;
+  /** Disjoint melds achieving the maximum cover. */
+  melds: MeldShape[];
+  /** Kind indices of the uncovered cards (one entry per card). */
+  leftovers: number[];
+}
+
+/**
+ * Like `bestCover`, but also returns one optimal grouping — used e.g. to sort
+ * a hand by melds. Sub-results stored in the memo are shared; treat the
+ * returned arrays as immutable.
+ */
+export function bestCoverGroups(countsIn: readonly number[]): CoverGroups {
+  const counts = countsIn.slice();
+  const memo = new Map<string, CoverGroups>();
+  const rec = (): CoverGroups => {
+    const k = firstNonzero(counts);
+    if (k < 0) return { covered: 0, melds: [], leftovers: [] };
+    const key = counts.join(',');
+    const hit = memo.get(key);
+    if (hit !== undefined) return hit;
+    counts[k]--;
+    const skip = rec();
+    counts[k]++;
+    let best: CoverGroups = {
+      covered: skip.covered,
+      melds: skip.melds,
+      leftovers: [k, ...skip.leftovers],
+    };
+    for (const shape of shapesAt(counts, k)) {
+      for (const u of shape.uses) counts[u]--;
+      const sub = rec();
+      for (const u of shape.uses) counts[u]++;
+      const covered = shape.uses.length + sub.covered;
+      if (covered > best.covered) {
+        best = { covered, melds: [shape, ...sub.melds], leftovers: sub.leftovers };
+      }
+    }
+    memo.set(key, best);
+    return best;
+  };
+  return rec();
+}
+
 /** Number of cards that cannot be melded — a rough "distance from winning". */
 export function leftoverCount(counts: readonly number[]): number {
   let total = 0;
