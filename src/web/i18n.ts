@@ -88,7 +88,8 @@ const en = {
   winBonusRow: 'Winning (tới)',
   totalRow: 'Total',
   paysLine: (lenh: number, name: string) =>
-    `Each losing player pays ${lenh} points. ${name} deals the next round.`,
+    `${name} banks ${lenh} points — only the winner scores. ${name} deals the next round.`,
+  tallyTitle: 'Score tally',
   viewTable: 'View table',
 
   hintDiscard: (card: string) =>
@@ -160,7 +161,7 @@ const en = {
     <ul>
       <li>Pair: 0 · lone Tướng / color runs / 3 mixed Tốt: 1 · 4 mixed Tốt: 4</li>
       <li>3 alike: 1 exposed, 6 concealed (khạp) · 4 alike (quằn): 6 exposed, 8 concealed</li>
-      <li>Winning adds +3; every loser pays the winner the full lệnh count.</li>
+      <li>Winning adds +7. Only the winner scores — their lệnh total is added to their running tally; the other players' totals don't change.</li>
     </ul>
     <p style="margin-top:6px;opacity:.75">Some traditional forced-capture and priority rules are simplified — see the README.</p>`,
 };
@@ -240,7 +241,9 @@ const vi: typeof en = {
   drawLine: 'Hết nọc mà chưa ai tới — ván này hòa, không ai ăn điểm.',
   winBonusRow: 'Tới',
   totalRow: 'Tổng',
-  paysLine: (lenh, name) => `Mỗi nhà thua trả ${lenh} điểm. ${name} làm cái ván sau.`,
+  paysLine: (lenh, name) =>
+    `${name} cộng ${lenh} điểm vào bảng điểm — chỉ người tới được điểm. ${name} làm cái ván sau.`,
+  tallyTitle: 'Bảng điểm',
   viewTable: 'Xem bàn',
 
   hintDiscard: (card) => `Gợi ý: đánh ${card} — lá này ít giúp bài của bạn nhất.`,
@@ -309,7 +312,7 @@ const vi: typeof en = {
     <ul>
       <li>Đôi: 0 · Tướng lẻ / bộ ba màu / 3 Tốt: 1 · 4 Tốt khác màu: 4</li>
       <li>Ba lá giống: ăn lộ 1, giữ kín (khạp) 6 · Quằn: lộ 6, kín 8</li>
-      <li>Tới cộng thêm 3 lệnh; mỗi nhà thua trả đủ số lệnh.</li>
+      <li>Tới cộng thêm 7 lệnh. Chỉ người tới được điểm — tổng lệnh cộng vào bảng điểm, các nhà khác không bị trừ.</li>
     </ul>
     <p style="margin-top:6px;opacity:.75">Bản chơi này lược giản một số luật ăn ép/ưu tiên của tứ sắc truyền thống — xem README.</p>`,
 };

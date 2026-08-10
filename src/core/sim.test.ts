@@ -3,6 +3,7 @@ import { applyAction, newGame, totalCards, ownedCards, NUM_PLAYERS, HAND_SIZE } 
 import { aiChooseAction } from './ai';
 import { toCounts, DECK_SIZE } from './types';
 import { fullyDecomposes } from './melds';
+import { WIN_BONUS } from './scoring';
 
 /**
  * Fuzz: play full AI-vs-AI games across many seeds and assert invariants at
@@ -36,7 +37,7 @@ describe('simulated games', () => {
         }
         expect(fullyDecomposes(toCounts(winnerHand))).toBe(true);
         expect(g.phase.score).not.toBeNull();
-        expect(g.phase.score!.lenh).toBeGreaterThanOrEqual(3);
+        expect(g.phase.score!.lenh).toBeGreaterThanOrEqual(WIN_BONUS);
       } else {
         draws++;
         expect(g.wall.length).toBe(0);

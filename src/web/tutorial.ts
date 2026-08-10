@@ -96,7 +96,7 @@ export function tutorialSlides(locale: Locale): Slide[] {
         body: `<p>Nếu lá đang mời hoàn thành toàn bộ bài của ai đó, người ấy <strong>tới</strong>
         ngay — máy tự phát hiện cho mọi nhà, kể cả bạn.</p>
         <p>Điểm tính bằng <strong>lệnh</strong>: đôi 0 · bộ ba màu / 3 Tốt / Tướng lẻ 1 ·
-        4 Tốt 4 · khạp 6 · quằn 8 · tới +3. Mỗi nhà thua trả đủ số lệnh.</p>`,
+        4 Tốt 4 · khạp 6 · quằn 8 · tới +7. Chỉ người tới được cộng điểm vào bảng điểm.</p>`,
       },
       {
         title: 'Sẵn sàng!',
@@ -152,8 +152,8 @@ export function tutorialSlides(locale: Locale): Slide[] {
       (<strong>tới</strong>) on the spot — the game checks this automatically for every seat,
       including yours.</p>
       <p>Scores are counted in <strong>lệnh</strong>: pair 0 · color runs / 3 mixed Tốt /
-      lone Tướng 1 · 4 mixed Tốt 4 · hidden triplet (khạp) 6 · quad (quằn) 8 · winning +3.
-      Every loser pays the winner the full amount.</p>`,
+      lone Tướng 1 · 4 mixed Tốt 4 · hidden triplet (khạp) 6 · quad (quằn) 8 · winning +7.
+      Only the winner scores — their total is added to their running tally.</p>`,
     },
     {
       title: 'Ready to play!',

@@ -92,7 +92,9 @@ If the wall runs out, the round is a draw.
 
 Scoring uses a common **lệnh** table (pair 0 · run / 3 pawns / lone general 1 ·
 4 pawns 4 · concealed triple "khạp" 6 / exposed 1 · quad "quằn" 8 concealed /
-6 exposed · +3 for winning); each loser pays the winner the full lệnh count.
+6 exposed · +7 for winning). Only the winner scores: their lệnh total is added
+to a running tally kept across rounds, and the other players' totals are
+unchanged — melds earn nothing unless you win the round.
 
 ### Simplifications vs. traditional table rules
 

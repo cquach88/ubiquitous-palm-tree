@@ -11,14 +11,15 @@
  *   3 con giống — trên tay (khạp)    6
  *   4 con giống — ăn/lộ              6
  *   4 con giống — trên tay (quằn)    8
- *   Tới (winning)                   +3
- * Each losing player pays the winner the full lệnh total.
+ *   Tới (winning)                   +7
+ * Only the winner scores: their lệnh total is added to their running tally.
+ * The other players neither gain nor lose points.
  */
 
 import type { MeldKind, MeldShape } from './melds';
 import { NUM_KINDS } from './types';
 
-export const WIN_BONUS = 3;
+export const WIN_BONUS = 7;
 
 export const MELD_LENH: Record<MeldKind, { concealed: number; exposed: number }> = {
   pair: { concealed: 0, exposed: 0 },

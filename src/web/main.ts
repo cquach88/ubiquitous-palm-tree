@@ -165,9 +165,9 @@ function onFinished(): void {
   if (netMode !== 'guest' && state.phase.type === 'finished') {
     const { winner, score } = state.phase;
     if (winner !== null && score) {
-      chips = chips.map((c, p) =>
-        p === winner ? c + score.lenh * (NUM_PLAYERS - 1) : c - score.lenh,
-      );
+      // Winner-take-only tally: the winner banks their round score; nobody
+      // else gains or loses anything.
+      chips = chips.map((c, p) => (p === winner ? c + score.lenh : c));
       saveJSON('tusac-chips', chips);
       dealer = winner;
     }
@@ -583,6 +583,19 @@ function humanSeatHTML(): string {
   </section>`;
 }
 
+function tallyHTML(winner: number | null): string {
+  const s = t();
+  const N = displayNames();
+  const rows = Array.from({ length: NUM_PLAYERS }, (_, p) => p)
+    .sort((a, b) => chips[b] - chips[a])
+    .map(
+      (p) =>
+        `<tr><td>${p === winner ? '🏆 ' : ''}${N[p]}</td><td>${chips[p]}</td></tr>`,
+    )
+    .join('');
+  return `<h3>${s.tallyTitle}</h3><table class="score-table">${rows}</table>`;
+}
+
 function resultDialogHTML(): string {
   if (state.phase.type !== 'finished') return '';
   const { winner, score, reason } = state.phase;
@@ -590,7 +603,7 @@ function resultDialogHTML(): string {
   const N = displayNames();
   let body: string;
   if (winner === null || !score) {
-    body = `<p>${s.drawLine}</p>`;
+    body = `<p>${s.drawLine}</p>${tallyHTML(null)}`;
   } else {
     const rows = score.breakdown
       .map(
@@ -606,7 +619,8 @@ function resultDialogHTML(): string {
         <tr><td>${s.winBonusRow}</td><td>${score.winBonus}</td></tr>
         <tr class="total"><td>${s.totalRow}</td><td>${score.lenh} lệnh</td></tr>
       </table>
-      <p style="margin-top:8px">${s.paysLine(score.lenh, N[winner])}</p>`;
+      <p style="margin-top:8px">${s.paysLine(score.lenh, N[winner])}</p>
+      ${tallyHTML(winner)}`;
   }
   const again =
     netMode === 'guest'
