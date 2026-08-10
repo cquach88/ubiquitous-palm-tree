@@ -25,12 +25,12 @@ const en = {
   hintsOn: '🎓 Hints: on',
   hintsOff: '🎓 Hints: off',
   sortLabel: {
-    rank: 'Sort: rank',
-    color: 'Sort: color',
-    melds: 'Sort: melds',
-    manual: 'Sort: manual',
+    rank: 'Sort: Rank',
+    color: 'Sort: Color',
+    melds: 'Sort: Melds',
+    manual: 'Sort: Manual',
   } as Record<string, string>,
-  dragHint: 'Drag cards to rearrange your hand.',
+  dragHint: 'Click two cards to swap them (or drag) — works in any sort mode.',
   dealer: 'Dealer',
   points: (n: number) => `${n >= 0 ? '+' : ''}${n} pts`,
   cardsInHand: (n: number) => `${n} cards in hand`,
@@ -51,7 +51,8 @@ const en = {
   stWin: (name: string, lenh: number) => `${name} wins — tới! (${lenh} lệnh)`,
 
   discardBtn: (card: string) => `Discard ${card}`,
-  discardHint: 'Click a card to select it, click it again (or the button) to discard.',
+  discardHint:
+    'Click the same card twice (or the button) to discard it. Click two different cards to swap them.',
   passDraw: 'Pass — draw from the wall',
   passRelay: 'Pass — hand it on',
 
@@ -177,12 +178,12 @@ const vi: typeof en = {
   hintsOn: '🎓 Gợi ý: bật',
   hintsOff: '🎓 Gợi ý: tắt',
   sortLabel: {
-    rank: 'Xếp: quân',
-    color: 'Xếp: màu',
-    melds: 'Xếp: bộ',
-    manual: 'Xếp: tự do',
+    rank: 'Xếp: Quân',
+    color: 'Xếp: Màu',
+    melds: 'Xếp: Bộ',
+    manual: 'Xếp: Tự do',
   },
-  dragHint: 'Kéo thả lá bài để tự sắp xếp.',
+  dragHint: 'Nhấn hai lá để đổi chỗ (hoặc kéo thả) — dùng được ở mọi kiểu xếp.',
   dealer: 'Cái',
   points: (n) => `${n >= 0 ? '+' : ''}${n} điểm`,
   cardsInHand: (n) => `${n} lá trên tay`,
@@ -203,7 +204,8 @@ const vi: typeof en = {
   stWin: (name, lenh) => `${name} tới! (${lenh} lệnh)`,
 
   discardBtn: (card) => `Đánh ${card}`,
-  discardHint: 'Nhấn vào một lá để chọn, nhấn lần nữa (hoặc nhấn nút) để đánh ra.',
+  discardHint:
+    'Nhấn hai lần vào cùng một lá (hoặc nhấn nút) để đánh ra. Nhấn hai lá khác nhau để đổi chỗ.',
   passDraw: 'Bỏ qua — bốc nọc',
   passRelay: 'Không ăn — nhường qua',
 

@@ -123,9 +123,9 @@ function startGame(): void {
 
 /** Route a local player's action: apply it (solo/host) or send it (guest). */
 function userAction(action: Action): void {
+  selectedCardId = null;
   if (netMode === 'guest') {
     guest?.send(action);
-    selectedCardId = null;
     render();
     return;
   }
@@ -134,7 +134,6 @@ function userAction(action: Action): void {
 
 function dispatch(action: Action): void {
   state = applyAction(state, action);
-  selectedCardId = null;
   if (state.phase.type === 'finished') {
     onFinished();
     return;
@@ -386,20 +385,36 @@ function displayedHand(): { cards: Card[]; starts: Set<number> } {
   return { cards, starts: new Set() };
 }
 
-function reorderManual(dragId: number, targetId: number | null): void {
-  const current = displayedHand().cards.map((c) => c.id);
+function toManualOrder(order: number[]): void {
   if (sortMode !== 'manual') {
     sortMode = 'manual';
     saveJSON('tusac-sort', sortMode);
   }
-  const without = current.filter((id) => id !== dragId);
+  manualOrder = order;
+  render();
+}
+
+/** Drag: move `dragId` in front of `targetId` (or to the end). */
+function reorderManual(dragId: number, targetId: number | null): void {
+  const without = displayedHand()
+    .cards.map((c) => c.id)
+    .filter((id) => id !== dragId);
   if (targetId === null || !without.includes(targetId)) {
     without.push(dragId);
   } else {
     without.splice(without.indexOf(targetId), 0, dragId);
   }
-  manualOrder = without;
-  render();
+  toManualOrder(without);
+}
+
+/** Click-click: swap the positions of two cards. Works from any sort mode. */
+function swapCards(a: number, b: number): void {
+  const order = displayedHand().cards.map((c) => c.id);
+  const ia = order.indexOf(a);
+  const ib = order.indexOf(b);
+  if (ia < 0 || ib < 0) return;
+  [order[ia], order[ib]] = [order[ib], order[ia]];
+  toManualOrder(order);
 }
 
 // ---------- rendering ----------
@@ -538,7 +553,6 @@ function humanActionsHTML(sug: Suggestion | null): string {
 }
 
 function humanSeatHTML(): string {
-  const canPick = state.phase.type === 'discard' && state.phase.player === mySeat;
   const sug = coachSuggestion();
   const suggestedId = sug?.action.type === 'discard' ? sug.action.cardId : null;
   const { cards, starts } = displayedHand();
@@ -558,7 +572,7 @@ function humanSeatHTML(): string {
         .map((c, i) =>
           cardHTML(
             c,
-            `${canPick ? 'clickable' : ''} ${c.id === selectedCardId ? 'selected' : ''} ${c.id === suggestedId ? 'suggest' : ''} ${starts.has(i) ? 'group-start' : ''}`,
+            `clickable ${c.id === selectedCardId ? 'selected' : ''} ${c.id === suggestedId ? 'suggest' : ''} ${starts.has(i) ? 'group-start' : ''}`,
             `data-action="select-card" data-card-id="${c.id}" draggable="true"`,
           ),
         )
@@ -942,13 +956,23 @@ document.addEventListener('click', (ev) => {
       else render();
       break;
     case 'select-card': {
-      if (state.phase.type !== 'discard' || state.phase.player !== mySeat) break;
       const id = Number(target.dataset.cardId);
-      if (selectedCardId === id) {
-        userAction({ type: 'discard', player: mySeat, cardId: id });
-      } else {
+      const myDiscard = state.phase.type === 'discard' && state.phase.player === mySeat;
+      if (selectedCardId === null) {
         selectedCardId = id;
         render();
+      } else if (selectedCardId === id) {
+        // Same card twice: discard on your turn, otherwise just deselect.
+        if (myDiscard) {
+          userAction({ type: 'discard', player: mySeat, cardId: id });
+        } else {
+          selectedCardId = null;
+          render();
+        }
+      } else {
+        const first = selectedCardId;
+        selectedCardId = null;
+        swapCards(first, id);
       }
       break;
     }
