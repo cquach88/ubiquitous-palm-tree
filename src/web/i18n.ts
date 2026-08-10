@@ -123,6 +123,7 @@ const en = {
   connError: (msg: string) => `Connection error: ${msg}`,
   onlineBadge: (code: string) => `Online · ${code}`,
   hostOnlyNewGame: 'Only the host can start the next round.',
+  reconnecting: 'Connection lost — reconnecting…',
 
   logLine(e: LogEvent, names: string[]): string {
     switch (e.type) {
@@ -275,6 +276,7 @@ const vi: typeof en = {
   connError: (msg) => `Lỗi kết nối: ${msg}`,
   onlineBadge: (code) => `Online · ${code}`,
   hostOnlyNewGame: 'Chỉ chủ phòng mới bắt đầu được ván mới.',
+  reconnecting: 'Mất kết nối — đang kết nối lại…',
 
   logLine(e, names) {
     switch (e.type) {

@@ -92,6 +92,94 @@ function saveJSON(key: string, value: unknown): void {
   }
 }
 
+// Per-tab session storage: survives a page refresh, gone when the tab closes.
+function ssGet<T>(key: string): T | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw === null ? null : (JSON.parse(raw) as T);
+  } catch {
+    return null;
+  }
+}
+
+function ssSet(key: string, value: unknown): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* ignore */
+  }
+}
+
+function ssDel(key: string): void {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Stable per-tab identity so the host can give us our seat back on refresh. */
+const myToken: string = (() => {
+  let token = ssGet<string>('tusac-token');
+  if (!token) {
+    token = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Math.random()}${Date.now()}`;
+    ssSet('tusac-token', token);
+  }
+  return token;
+})();
+
+interface OnlineSession {
+  role: 'host' | 'guest';
+  code: string;
+}
+
+interface HostSnapshot {
+  state: GameState;
+  chips: number[];
+  mpNames: (string | null)[];
+  tokens: (string | null)[];
+  mpStarted: boolean;
+  dealer: number;
+  settled: boolean;
+}
+
+interface GuestSnapshot {
+  state: GameState;
+  chips: number[];
+  mpNames: (string | null)[];
+  mySeat: number;
+}
+
+let reconnecting = false;
+let reconnectTries = 0;
+const MAX_RECONNECT_TRIES = 20;
+
+function clearOnlineSession(): void {
+  ssDel('tusac-online');
+  ssDel('tusac-hostgame');
+  ssDel('tusac-guestgame');
+}
+
+function saveHostSnapshot(): void {
+  if (netMode !== 'host') return;
+  ssSet('tusac-online', { role: 'host', code: roomCode } satisfies OnlineSession);
+  ssSet('tusac-hostgame', {
+    state,
+    chips,
+    mpNames,
+    tokens: host?.getTokens() ?? new Array(NUM_PLAYERS).fill(null),
+    mpStarted,
+    dealer,
+    settled,
+  } satisfies HostSnapshot);
+}
+
+function saveGuestSnapshot(): void {
+  if (netMode !== 'guest') return;
+  ssSet('tusac-online', { role: 'guest', code: roomCode } satisfies OnlineSession);
+  ssSet('tusac-guestgame', { state, chips, mpNames, mySeat } satisfies GuestSnapshot);
+}
+
 function displayNames(): string[] {
   const names: string[] = [];
   for (let s = 0; s < NUM_PLAYERS; s++) {
@@ -180,7 +268,9 @@ function onFinished(): void {
 // ---------- multiplayer ----------
 
 function broadcastState(): void {
-  if (netMode !== 'host' || !host || !mpStarted) return;
+  if (netMode !== 'host' || !host) return;
+  saveHostSnapshot();
+  if (!mpStarted) return;
   const connected = host.connectedSeats();
   for (let s = 1; s < NUM_PLAYERS; s++) {
     if (connected[s]) {
@@ -191,10 +281,69 @@ function broadcastState(): void {
 
 function broadcastLobby(): void {
   if (netMode !== 'host' || !host) return;
+  saveHostSnapshot();
   const connected = host.connectedSeats();
   for (let s = 1; s < NUM_PLAYERS; s++) {
     if (connected[s]) host.sendTo(s, { t: 'lobby', seats: mpNames, yourSeat: s });
   }
+}
+
+function createHostNet(code: string, tokens?: (string | null)[]): void {
+  host = new HostNet(
+    code,
+    {
+      onOpen: () => {
+        reconnecting = false;
+        reconnectTries = 0;
+        saveHostSnapshot();
+        render();
+      },
+      onError: (message, type) => {
+        // After a refresh the signaling server may briefly think our room ID
+        // is still taken by the dead tab — retry until it frees up.
+        if (type === 'unavailable-id' && netMode === 'host' && reconnectTries < MAX_RECONNECT_TRIES) {
+          reconnecting = true;
+          reconnectTries++;
+          render();
+          setTimeout(() => {
+            if (netMode === 'host') {
+              host?.close();
+              createHostNet(code, tokens);
+            }
+          }, 2500);
+          return;
+        }
+        netError = t().connError(message);
+        render();
+      },
+      onJoin: (seat, name) => {
+        mpNames[seat] = name;
+        broadcastLobby();
+        if (mpStarted) broadcastState();
+        render();
+      },
+      onLeave: (seat) => {
+        mpNames[seat] = null;
+        broadcastLobby();
+        if (mpStarted) {
+          broadcastState();
+          if (state.phase.type !== 'finished' && state.phase.player === seat) afterAction();
+        }
+        render();
+      },
+      onAction: (seat, action) => {
+        if (netMode !== 'host' || !mpStarted) return;
+        if (!action || action.player !== seat) return;
+        try {
+          dispatch(action);
+        } catch {
+          // Illegal/stale action — resync that guest.
+          host?.sendTo(seat, { t: 'state', state: redactFor(state, seat), chips, names: mpNames });
+        }
+      },
+    },
+    tokens,
+  );
 }
 
 function startHosting(): void {
@@ -207,55 +356,25 @@ function startHosting(): void {
   mpStarted = false;
   netError = '';
   onlineView = 'hostLobby';
-  host = new HostNet(roomCode, {
-    onOpen: () => render(),
-    onError: (message) => {
-      netError = t().connError(message);
-      render();
-    },
-    onJoin: (seat, name) => {
-      mpNames[seat] = name;
-      broadcastLobby();
-      if (mpStarted) broadcastState();
-      render();
-    },
-    onLeave: (seat) => {
-      mpNames[seat] = null;
-      broadcastLobby();
-      if (mpStarted) {
-        broadcastState();
-        if (state.phase.type !== 'finished' && state.phase.player === seat) afterAction();
-      }
-      render();
-    },
-    onAction: (seat, action) => {
-      if (netMode !== 'host' || !mpStarted) return;
-      if (!action || action.player !== seat) return;
-      try {
-        dispatch(action);
-      } catch {
-        // Illegal/stale action — resync that guest.
-        host?.sendTo(seat, { t: 'state', state: redactFor(state, seat), chips, names: mpNames });
-      }
-    },
-  });
+  createHostNet(roomCode);
+  saveHostSnapshot();
   render();
 }
 
-function joinGame(code: string): void {
-  leaveOnline(false);
-  netMode = 'guest';
-  roomCode = code;
-  mpStarted = false;
-  netError = '';
-  onlineView = 'guestLobby';
-  guest = new GuestNet(code, myName, {
+function createGuestNet(code: string): void {
+  guest?.close();
+  guest = new GuestNet(code, myName, myToken, {
     onLobby: (seats, yourSeat) => {
+      reconnecting = false;
+      reconnectTries = 0;
       mpNames = seats;
       mySeat = yourSeat;
+      ssSet('tusac-online', { role: 'guest', code } satisfies OnlineSession);
       render();
     },
     onState: (s, c, names) => {
+      reconnecting = false;
+      reconnectTries = 0;
       state = s;
       chips = c;
       mpNames = names;
@@ -263,6 +382,7 @@ function joinGame(code: string): void {
         mpStarted = true;
         if (onlineView === 'guestLobby') onlineView = null;
       }
+      saveGuestSnapshot();
       if (state.phase.type === 'finished') {
         if (!settled) {
           settled = true;
@@ -277,19 +397,48 @@ function joinGame(code: string): void {
     },
     onFull: () => {
       netError = t().roomFull;
+      clearOnlineSession();
       backToSolo();
     },
-    onClose: () => {
-      if (netMode === 'guest') {
-        netError = t().hostLeft;
-        backToSolo();
+    onClose: () => guestConnectionLost(),
+    onError: (message, type) => {
+      if (type === 'peer-unavailable' || type === 'network' || type === 'disconnected') {
+        guestConnectionLost();
+        return;
       }
-    },
-    onError: (message) => {
       netError = t().connError(message);
       render();
     },
   });
+}
+
+/** The host vanished (refresh, network blip). Keep the table and retry. */
+function guestConnectionLost(): void {
+  if (netMode !== 'guest') return;
+  if (reconnectTries < MAX_RECONNECT_TRIES) {
+    reconnecting = true;
+    reconnectTries++;
+    render();
+    setTimeout(() => {
+      if (netMode === 'guest') createGuestNet(roomCode);
+    }, 2500);
+    return;
+  }
+  netError = t().hostLeft;
+  clearOnlineSession();
+  backToSolo();
+}
+
+function joinGame(code: string): void {
+  leaveOnline(false);
+  netMode = 'guest';
+  roomCode = code;
+  mpStarted = false;
+  netError = '';
+  reconnecting = false;
+  reconnectTries = 0;
+  onlineView = 'guestLobby';
+  createGuestNet(code);
   render();
 }
 
@@ -307,13 +456,67 @@ function leaveOnline(restart: boolean): void {
   netMode = 'solo';
   mySeat = 0;
   mpStarted = false;
+  reconnecting = false;
+  reconnectTries = 0;
   mpNames = new Array(NUM_PLAYERS).fill(null);
   roomCode = '';
   if (restart) {
+    clearOnlineSession();
     onlineView = null;
     netError = '';
     startGame();
   }
+}
+
+/** Resume an online session after a page refresh (per-tab). */
+function tryRestoreOnline(): boolean {
+  const session = ssGet<OnlineSession>('tusac-online');
+  if (!session || !session.code) return false;
+
+  if (session.role === 'guest') {
+    const snap = ssGet<GuestSnapshot>('tusac-guestgame');
+    netMode = 'guest';
+    roomCode = session.code;
+    netError = '';
+    if (snap) {
+      state = snap.state;
+      chips = snap.chips;
+      mpNames = snap.mpNames;
+      mySeat = snap.mySeat;
+      mpStarted = true;
+      settled = state.phase.type === 'finished';
+      onlineView = null;
+    } else {
+      state = newGame({ seed: 1, dealer: 0 });
+      mpStarted = false;
+      onlineView = 'guestLobby';
+    }
+    reconnecting = true;
+    createGuestNet(session.code);
+    render();
+    return true;
+  }
+
+  const snap = ssGet<HostSnapshot>('tusac-hostgame');
+  if (!snap) return false;
+  netMode = 'host';
+  mySeat = 0;
+  roomCode = session.code;
+  mpNames = snap.mpNames;
+  mpStarted = snap.mpStarted;
+  dealer = snap.dealer;
+  chips = snap.chips;
+  settled = snap.settled;
+  state = snap.state;
+  netError = '';
+  onlineView = mpStarted ? null : 'hostLobby';
+  // Guests' connections died with the old tab; they will reconnect with
+  // their tokens and get their seats back.
+  for (let s = 1; s < NUM_PLAYERS; s++) mpNames[s] = null;
+  createHostNet(roomCode, snap.tokens);
+  render();
+  if (mpStarted) afterAction();
+  return true;
 }
 
 // ---------- coach ----------
@@ -455,6 +658,7 @@ function statusText(): string {
   const phase = state.phase;
   const s = t();
   const N = displayNames();
+  if (reconnecting) return s.reconnecting;
   if (phase.type === 'finished') {
     if (phase.winner === null) return s.stDrawGame;
     return s.stWin(N[phase.winner], phase.score?.lenh ?? 0);
@@ -1075,7 +1279,9 @@ document.addEventListener('click', (ev) => {
   }
 });
 
-startGame();
-if (!loadJSON('tusac-tutorial-seen', false)) {
-  openTutorial();
+if (!tryRestoreOnline()) {
+  startGame();
+  if (!loadJSON('tusac-tutorial-seen', false)) {
+    openTutorial();
+  }
 }

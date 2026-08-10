@@ -18,7 +18,7 @@ import type { Action, Card, GameState } from '../core';
 import { NUM_PLAYERS } from '../core';
 
 export type NetMsg =
-  | { t: 'hello'; name: string }
+  | { t: 'hello'; name: string; token: string }
   | { t: 'lobby'; seats: (string | null)[]; yourSeat: number }
   | { t: 'state'; state: GameState; chips: number[]; names: (string | null)[] }
   | { t: 'action'; action: Action }
@@ -73,17 +73,28 @@ export interface HostHandlers {
   onJoin(seat: number, name: string): void;
   onLeave(seat: number): void;
   onAction(seat: number, action: Action): void;
-  onError(message: string): void;
+  onError(message: string, type: string): void;
 }
 
 export class HostNet {
   private peer: Peer;
   private conns: (DataConnection | null)[] = new Array(NUM_PLAYERS).fill(null);
+  /**
+   * Stable per-tab identity of the guest last seen in each seat. A guest who
+   * refreshes reconnects with the same token and gets their seat back.
+   */
+  private tokens: (string | null)[] = new Array(NUM_PLAYERS).fill(null);
 
-  constructor(code: string, private handlers: HostHandlers) {
+  constructor(code: string, private handlers: HostHandlers, savedTokens?: (string | null)[]) {
+    if (savedTokens && savedTokens.length === NUM_PLAYERS) this.tokens = savedTokens.slice();
     this.peer = new Peer(peerIdFor(code), peerOptions());
     this.peer.on('open', () => handlers.onOpen());
-    this.peer.on('error', (e) => handlers.onError(String((e as Error).message ?? e)));
+    this.peer.on('error', (e) =>
+      handlers.onError(
+        String((e as Error).message ?? e),
+        String((e as { type?: string }).type ?? ''),
+      ),
+    );
     this.peer.on('connection', (conn) => this.accept(conn));
   }
 
@@ -91,13 +102,25 @@ export class HostNet {
     conn.on('data', (data) => {
       const msg = data as NetMsg;
       if (msg.t === 'hello') {
-        const seat = this.conns.findIndex((c, i) => i > 0 && c === null);
+        const token = String(msg.token ?? '');
+        // Reclaim: same token gets its old seat back (never the host's).
+        let seat = token ? this.tokens.indexOf(token) : -1;
+        if (seat === 0) seat = -1;
+        if (seat < 0) {
+          seat = this.conns.findIndex((c, i) => i > 0 && c === null && this.tokens[i] === null);
+        }
+        if (seat < 0) {
+          // No untouched seat: reuse one abandoned by a departed guest.
+          seat = this.conns.findIndex((c, i) => i > 0 && c === null);
+        }
         if (seat < 0) {
           conn.send({ t: 'full' } satisfies NetMsg);
           setTimeout(() => conn.close(), 500);
           return;
         }
+        this.conns[seat]?.close();
         this.conns[seat] = conn;
+        this.tokens[seat] = token || null;
         conn.on('close', () => {
           if (this.conns[seat] === conn) {
             this.conns[seat] = null;
@@ -110,6 +133,10 @@ export class HostNet {
         if (seat > 0) this.handlers.onAction(seat, msg.action);
       }
     });
+  }
+
+  getTokens(): (string | null)[] {
+    return this.tokens.slice();
   }
 
   connectedSeats(): boolean[] {
@@ -130,20 +157,25 @@ export interface GuestHandlers {
   onState(state: GameState, chips: number[], names: (string | null)[]): void;
   onFull(): void;
   onClose(): void;
-  onError(message: string): void;
+  onError(message: string, type: string): void;
 }
 
 export class GuestNet {
   private peer: Peer;
   private conn: DataConnection | null = null;
 
-  constructor(code: string, name: string, private handlers: GuestHandlers) {
+  constructor(code: string, name: string, token: string, private handlers: GuestHandlers) {
     this.peer = new Peer(peerOptions());
-    this.peer.on('error', (e) => handlers.onError(String((e as Error).message ?? e)));
+    this.peer.on('error', (e) =>
+      handlers.onError(
+        String((e as Error).message ?? e),
+        String((e as { type?: string }).type ?? ''),
+      ),
+    );
     this.peer.on('open', () => {
       const conn = this.peer.connect(peerIdFor(code), { reliable: true });
       this.conn = conn;
-      conn.on('open', () => conn.send({ t: 'hello', name } satisfies NetMsg));
+      conn.on('open', () => conn.send({ t: 'hello', name, token } satisfies NetMsg));
       conn.on('close', () => handlers.onClose());
       conn.on('data', (data) => {
         const msg = data as NetMsg;
