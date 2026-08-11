@@ -167,11 +167,12 @@ button.online-active {
 .seat .who {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   font-weight: 700;
   font-size: var(--fs-md);
   white-space: nowrap;
   min-width: 0;
+  flex-wrap: wrap; /* long rows (e.g. "Unmatched cards") wrap on narrow screens */
 }
 
 .badge {
@@ -312,6 +313,8 @@ button.suggest {
 
 .backs {
   display: flex;
+  max-width: 100%;
+  overflow: hidden; /* the fan clips instead of bursting the seat box */
 }
 
 .backs .card { margin-left: calc(var(--mini-w) * -0.55); }
@@ -386,7 +389,8 @@ button.suggest {
 
 .hand .card {
   cursor: grab;
-  touch-action: pan-y;
+  /* Touch on a card is always a drag gesture, never a page scroll. */
+  touch-action: none;
 }
 
 .hand .card.dragging {
@@ -398,6 +402,10 @@ button.suggest {
 
 .hand .card.drop-before {
   box-shadow: -5px 0 0 0 var(--accent), 0 1px 3px rgb(0 0 0 / 45%);
+}
+
+.hand .card.drop-after {
+  box-shadow: 5px 0 0 0 var(--accent), 0 1px 3px rgb(0 0 0 / 45%);
 }
 
 .hand .card.group-start { margin-left: calc(var(--card-w) * 0.3); }

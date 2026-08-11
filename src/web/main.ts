@@ -16,6 +16,7 @@ import {
   aiChooseAction,
   applyAction,
   bestCoverGroups,
+  decodeActions,
   encodeAction,
   encodeActions,
   kindName,
@@ -163,6 +164,15 @@ interface GuestSnapshot {
   mySeat: number;
 }
 
+interface SoloSnapshot {
+  state: GameState;
+  dealer: number;
+  gameSeed: number;
+  gameDealer: number;
+  actions: string;
+  settled: boolean;
+}
+
 let reconnecting = false;
 let reconnectTries = 0;
 const MAX_RECONNECT_TRIES = 20;
@@ -307,6 +317,31 @@ function saveGuestSnapshot(): void {
   ssSet('tusac-guestgame', { state, chips, mpNames, mySeat } satisfies GuestSnapshot);
 }
 
+/** Solo games also survive a refresh (per tab). */
+function saveSoloSnapshot(): void {
+  if (netMode !== 'solo') return;
+  ssSet('tusac-sologame', {
+    state,
+    dealer,
+    gameSeed,
+    gameDealer,
+    actions: encodeActions(actionHistory),
+    settled,
+  } satisfies SoloSnapshot);
+}
+
+/** Restore the manual card arrangement if it belongs to the current deal. */
+function restoreManualOrder(): void {
+  const saved = ssGet<{ seed: number; order: number[] }>('tusac-manualorder');
+  if (saved && saved.seed === gameSeed && Array.isArray(saved.order)) {
+    manualOrder = saved.order;
+  }
+}
+
+function persistManualOrder(): void {
+  ssSet('tusac-manualorder', { seed: gameSeed, order: manualOrder });
+}
+
 /** Seat names for rendering — HTML-escaped, since names are user input. */
 function displayNames(): string[] {
   const names: string[] = [];
@@ -337,6 +372,7 @@ function startGame(): void {
   actionHistory = [];
   historyComplete = true;
   state = newGame({ seed: gameSeed, dealer });
+  saveSoloSnapshot();
   render();
   afterAction();
 }
@@ -359,6 +395,7 @@ function dispatch(action: Action): void {
     onFinished();
     return;
   }
+  saveSoloSnapshot();
   render();
   broadcastState();
   afterAction();
@@ -408,6 +445,7 @@ function onFinished(): void {
       dealer = winner;
     }
   }
+  saveSoloSnapshot();
   render();
   broadcastState();
   (document.getElementById('result-dialog') as HTMLDialogElement | null)?.showModal();
@@ -665,6 +703,9 @@ function tryRestoreOnline(): boolean {
       mpStarted = false;
       onlineView = 'guestLobby';
     }
+    gameSeed = state.seed;
+    gameDealer = state.dealer;
+    restoreManualOrder();
     reconnecting = true;
     createGuestNet(session.code);
     render();
@@ -686,6 +727,7 @@ function tryRestoreOnline(): boolean {
   chatLog = snap.chat ?? [];
   gameSeed = state.seed;
   gameDealer = state.dealer;
+  restoreManualOrder();
   actionHistory = [];
   historyComplete = false; // history from before the refresh is gone
   netError = '';
@@ -764,7 +806,11 @@ function displayedHand(): { cards: Card[]; starts: Set<number> } {
       (pos.get(a.id) ?? 10_000 + kindOf(a)) - (pos.get(b.id) ?? 10_000 + kindOf(b)) ||
       a.id - b.id,
   );
-  manualOrder = cards.map((c) => c.id);
+  const next = cards.map((c) => c.id);
+  if (next.join() !== manualOrder.join()) {
+    manualOrder = next;
+    persistManualOrder();
+  }
   return { cards, starts: new Set() };
 }
 
@@ -774,18 +820,20 @@ function toManualOrder(order: number[]): void {
     saveJSON('tusac-sort', sortMode);
   }
   manualOrder = order;
+  persistManualOrder();
   render();
 }
 
-/** Drag: move `dragId` in front of `targetId` (or to the end). */
-function reorderManual(dragId: number, targetId: number | null): void {
+/** Drag: insert `dragId` before or after `targetId` (or at the end). */
+function reorderManual(dragId: number, targetId: number | null, before: boolean): void {
   const without = displayedHand()
     .cards.map((c) => c.id)
     .filter((id) => id !== dragId);
   if (targetId === null || !without.includes(targetId)) {
     without.push(dragId);
   } else {
-    without.splice(without.indexOf(targetId), 0, dragId);
+    const idx = without.indexOf(targetId) + (before ? 0 : 1);
+    without.splice(idx, 0, dragId);
   }
   toManualOrder(without);
 }
@@ -1299,18 +1347,55 @@ interface DragState {
 let drag: DragState | null = null;
 let suppressNextClick = false;
 
-function dropTargetAt(x: number, y: number): HTMLElement | null {
-  return (
-    (document
-      .elementsFromPoint(x, y)
-      .find(
-        (el) => el instanceof HTMLElement && el.matches('#hand .card') && el !== drag?.el,
-      ) as HTMLElement | undefined) ?? null
-  );
+interface DropInfo {
+  targetId: number | null;
+  before: boolean;
+}
+
+/**
+ * Where would a card dropped at (x, y) land? Uses the nearest card by
+ * geometry — not an exact hit — so drops in the gaps between cards, or a
+ * little above/below the row, still insert where the player pointed instead
+ * of falling to the end of the hand.
+ */
+function dropInfoAt(x: number, y: number, excludeId: number): DropInfo | null {
+  const hand = document.getElementById('hand');
+  if (!hand) return null;
+  const bounds = hand.getBoundingClientRect();
+  const PAD = 60;
+  if (x < bounds.left - PAD || x > bounds.right + PAD || y < bounds.top - PAD || y > bounds.bottom + PAD) {
+    return null; // dropped far away — cancel
+  }
+  let best: HTMLElement | null = null;
+  let bestDist = Infinity;
+  for (const el of hand.querySelectorAll<HTMLElement>('.card')) {
+    if (Number(el.dataset.cardId) === excludeId) continue;
+    const r = el.getBoundingClientRect();
+    const dx = r.x + r.width / 2 - x;
+    const dy = r.y + r.height / 2 - y;
+    const dist = dx * dx + dy * dy * 2.5; // weight rows heavier than columns
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = el;
+    }
+  }
+  if (!best) return { targetId: null, before: false };
+  const r = best.getBoundingClientRect();
+  return { targetId: Number(best.dataset.cardId), before: x < r.x + r.width / 2 };
 }
 
 function clearDropMarkers(): void {
-  document.querySelectorAll('#hand .card.drop-before').forEach((el) => el.classList.remove('drop-before'));
+  document
+    .querySelectorAll('#hand .card.drop-before, #hand .card.drop-after')
+    .forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+}
+
+function markDrop(info: DropInfo | null): void {
+  clearDropMarkers();
+  if (!info || info.targetId === null) return;
+  document
+    .querySelector(`#hand .card[data-card-id="${info.targetId}"]`)
+    ?.classList.add(info.before ? 'drop-before' : 'drop-after');
 }
 
 document.addEventListener('pointerdown', (ev) => {
@@ -1334,15 +1419,14 @@ document.addEventListener(
     const dx = ev.clientX - drag.startX;
     const dy = ev.clientY - drag.startY;
     if (!drag.active) {
-      if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy)) return;
+      if (Math.hypot(dx, dy) < 8) return;
       drag.active = true;
       drag.el.classList.add('dragging');
     }
     ev.preventDefault();
     drag.transform = `translate(${dx}px, ${dy}px)`;
     drag.el.style.transform = drag.transform;
-    clearDropMarkers();
-    dropTargetAt(ev.clientX, ev.clientY)?.classList.add('drop-before');
+    markDrop(dropInfoAt(ev.clientX, ev.clientY, drag.id));
   },
   { passive: false },
 );
@@ -1362,10 +1446,8 @@ function endDrag(ev: PointerEvent, apply: boolean): void {
     suppressNextClick = false;
   }, 0);
   if (apply) {
-    const over = dropTargetAt(ev.clientX, ev.clientY);
-    const overHand = document.elementsFromPoint(ev.clientX, ev.clientY).some((el) => el.id === 'hand');
-    const targetId = over ? Number(over.dataset.cardId) : null;
-    if (over || overHand) reorderManual(d.id, targetId);
+    const info = dropInfoAt(ev.clientX, ev.clientY, d.id);
+    if (info) reorderManual(d.id, info.targetId, info.before);
     else render();
   } else {
     render();
@@ -1606,7 +1688,33 @@ installGlobalHandlers(() => {
   render();
 }, phaseLabelForLog);
 
-if (!tryRestoreOnline()) {
+/** Resume a solo game after a refresh (per tab). */
+function trySoloRestore(): boolean {
+  const snap = ssGet<SoloSnapshot>('tusac-sologame');
+  if (!snap?.state) return false;
+  state = snap.state;
+  dealer = snap.dealer;
+  gameSeed = snap.gameSeed;
+  gameDealer = snap.gameDealer;
+  settled = snap.settled;
+  try {
+    actionHistory = decodeActions(snap.actions ?? '');
+    historyComplete = true;
+  } catch {
+    actionHistory = [];
+    historyComplete = false;
+  }
+  restoreManualOrder();
+  render();
+  if (state.phase.type === 'finished') {
+    (document.getElementById('result-dialog') as HTMLDialogElement | null)?.showModal();
+  } else {
+    afterAction();
+  }
+  return true;
+}
+
+if (!tryRestoreOnline() && !trySoloRestore()) {
   startGame();
   if (!loadJSON('tusac-tutorial-seen', false)) {
     openTutorial();
