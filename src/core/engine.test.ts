@@ -75,6 +75,48 @@ describe('game flow', () => {
     throw new Error('No capture found across seeds — suspicious');
   });
 
+  it('offers pair capture on own wall flips', () => {
+    outer: for (let seed = 1; seed < 400; seed++) {
+      let g = newGame({ seed, dealer: 0 });
+      if (g.phase.type !== 'discard') continue;
+      for (let step = 0; step < 200; step++) {
+        if (g.phase.type === 'finished') continue outer;
+        if (g.phase.type === 'respond' && g.phase.source === 'wall') {
+          const pair = legalEats(g).find((o) => o.kind === 'pair');
+          if (pair) {
+            // Take the pair: it must expose a 2-card meld and lead to a discard.
+            const player = g.phase.player;
+            g = applyAction(g, { type: 'eat', player, option: pair });
+            const meld = g.players[player].melds[g.players[player].melds.length - 1];
+            expect(meld.kind).toBe('pair');
+            expect(meld.cards.length).toBe(2);
+            expect(g.phase).toEqual({ type: 'discard', player });
+            expect(totalCards(g)).toBe(DECK_SIZE);
+            return;
+          }
+        }
+        g = applyAction(g, aiChooseAction(g));
+      }
+    }
+    throw new Error('No wall-flip pair opportunity found across seeds');
+  });
+
+  it('never offers pair capture on discard-source offers', () => {
+    let checkedDiscards = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      let g = newGame({ seed, dealer: seed % 4 });
+      let steps = 0;
+      while (g.phase.type !== 'finished' && steps++ < 2000) {
+        if (g.phase.type === 'respond' && g.phase.source === 'discard') {
+          expect(legalEats(g).some((o) => o.kind === 'pair')).toBe(false);
+          checkedDiscards++;
+        }
+        g = applyAction(g, aiChooseAction(g));
+      }
+    }
+    expect(checkedDiscards).toBeGreaterThan(50);
+  });
+
   it('rejects illegal actions', () => {
     const g = newGame({ seed: 3, dealer: 0 });
     if (g.phase.type !== 'discard') return;

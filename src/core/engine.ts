@@ -10,8 +10,10 @@
  *  - A discarded card is offered to the next player, who may capture it
  *    ("ăn") into a meld of 3+ cards and then discard, or pass.
  *  - On a pass, the offered card is dead; the passer flips the top of the
- *    wall ("bốc nọc"). They may capture the flipped card (then discard) or
- *    pass it on to the next player, who treats it like a discard.
+ *    wall ("bốc nọc"). They may capture the flipped card — including into a
+ *    bare pair with an identical hand card ("chui đôi"), allowed only on
+ *    one's own wall flip — then discard, or pass it on to the next player,
+ *    who treats it like a discard.
  *  - Whenever a card is offered, any player whose hand it completes wins
  *    immediately ("tới") — checked in seat order starting from the player
  *    the card is offered to. Winning beats capturing.
@@ -131,11 +133,20 @@ export function sortHand(cards: Card[]): Card[] {
   return cards.slice().sort((a, b) => kindOf(a) - kindOf(b) || a.id - b.id);
 }
 
-/** Legal capture options for the responding player, or [] otherwise. */
+/**
+ * Legal capture options for the responding player, or [] otherwise.
+ * A card the player flipped from the wall themselves may also be captured
+ * into a pair ("chui đôi"); a discarded card requires a meld of 3+.
+ */
 export function legalEats(state: GameState): EatOption[] {
   if (state.phase.type !== 'respond' || !state.offered) return [];
   const hand = state.players[state.phase.player].hand;
-  return eatOptions(toCounts(hand), kindOf(state.offered), hand.length);
+  return eatOptions(
+    toCounts(hand),
+    kindOf(state.offered),
+    hand.length,
+    state.phase.source === 'wall',
+  );
 }
 
 function clone(state: GameState): GameState {

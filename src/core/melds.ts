@@ -195,9 +195,13 @@ export function winsWith(handCounts: readonly number[], offeredKind: number): bo
 
 /**
  * A way to capture ("ăn") an offered card: the meld formed and the card
- * kinds taken from hand to complete it. Capturing to form a bare pair is not
- * allowed — a capture must produce a meld of 3+ cards (pairs only complete
- * a hand when winning, which is handled by `winsWith`).
+ * kinds taken from hand to complete it.
+ *
+ * A discarded card may only be captured into a meld of 3+ cards — you cannot
+ * take someone's discard just to pair it (pairs only complete a hand when
+ * winning, which `winsWith` handles). A card you flip from the wall yourself
+ * may additionally be captured into a pair with an identical hand card
+ * ("chui đôi") — pass `allowPair` for that case.
  */
 export interface EatOption {
   kind: MeldKind;
@@ -209,12 +213,14 @@ export function eatOptions(
   handCounts: readonly number[],
   offeredKind: number,
   handSize: number,
+  allowPair = false,
 ): EatOption[] {
   const opts: EatOption[] = [];
   const k = offeredKind;
   const rank = Math.floor(k / 4);
   const color = k % 4;
 
+  if (allowPair && handCounts[k] >= 1) opts.push({ kind: 'pair', fromHand: [k] });
   if (handCounts[k] >= 2) opts.push({ kind: 'triple', fromHand: [k, k] });
   if (handCounts[k] >= 3) opts.push({ kind: 'quad', fromHand: [k, k, k] });
 

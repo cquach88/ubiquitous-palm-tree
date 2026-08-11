@@ -179,4 +179,19 @@ describe('eatOptions', () => {
     expect(eatOptions(hand, K('cannon', 'green'), 2)).toEqual([]);
     expect(eatOptions(hand, K('cannon', 'green'), 3).map((o) => o.kind)).toEqual(['triple']);
   });
+  it('allows pairing only when allowPair is set (own wall flip)', () => {
+    const one = counts(K('horse', 'white'));
+    expect(eatOptions(one, K('horse', 'white'), 10)).toEqual([]);
+    expect(eatOptions(one, K('horse', 'white'), 10, true)).toEqual([
+      { kind: 'pair', fromHand: [K('horse', 'white')] },
+    ]);
+    // With two in hand, the wall flip offers pair, triple — never for discards.
+    const two = counts(K('horse', 'white'), K('horse', 'white'));
+    expect(eatOptions(two, K('horse', 'white'), 10, true).map((o) => o.kind).sort()).toEqual(
+      ['pair', 'triple'],
+    );
+    expect(eatOptions(two, K('horse', 'white'), 10).map((o) => o.kind)).toEqual(['triple']);
+    // Pairing still requires a card left to discard.
+    expect(eatOptions(one, K('horse', 'white'), 1, true)).toEqual([]);
+  });
 });

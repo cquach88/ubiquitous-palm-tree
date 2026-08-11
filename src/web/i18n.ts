@@ -171,6 +171,7 @@ const en = {
     <ul>
       <li>The dealer opens by discarding a card. A discarded card is offered to the next player.</li>
       <li>That player may <strong>capture</strong> it ("ăn") — combining it with hand cards into a face-up group of 3+ — and then discard, or <strong>pass</strong> and flip a card from the wall.</li>
+      <li>A card you flip from the wall yourself may also be captured into a <strong>pair</strong> with an identical card from your hand ("chui đôi"). Discarded cards can never be taken just to pair them.</li>
       <li>A flipped wall card they don't use is offered to the next player.</li>
       <li>If an offered card completes someone's whole hand, they <strong>win ("tới")</strong> instantly — the game detects this for you.</li>
       <li>If the wall runs out, the round is a draw.</li>
@@ -340,6 +341,7 @@ const vi: typeof en = {
     <ul>
       <li>Nhà cái đánh 1 lá mở màn. Lá đánh ra được mời nhà kế tiếp.</li>
       <li>Người được mời có thể <strong>ăn</strong> (ghép thành nhóm ≥ 3 lá, lật lên bàn rồi đánh 1 lá) hoặc <strong>bỏ qua</strong> và bốc nọc.</li>
+      <li>Lá tự bốc từ nọc còn có thể <strong>chui đôi</strong> — ghép với một lá giống hệt trên tay thành đôi lật lên bàn. Bài người khác đánh ra thì không được ăn chỉ để tạo đôi.</li>
       <li>Lá nọc không ăn sẽ được nhường cho nhà kế tiếp.</li>
       <li>Ai ghép được lá đang mời để hoàn thành toàn bộ bài thì <strong>tới</strong> ngay (máy tự phát hiện).</li>
       <li>Hết nọc mà chưa ai tới thì hòa.</li>
