@@ -111,20 +111,30 @@ describe('game flow', () => {
     throw new Error('No wall-flip pair opportunity found across seeds');
   });
 
-  it('never offers pair capture on discard-source offers', () => {
-    let checkedDiscards = 0;
-    for (let seed = 1; seed <= 10; seed++) {
-      let g = newGame({ seed, dealer: seed % 4 });
-      let steps = 0;
-      while (g.phase.type !== 'finished' && steps++ < 2000) {
+  it('offers pair capture on discarded cards when holding an identical one', () => {
+    outer: for (let seed = 1; seed < 300; seed++) {
+      let g = newGame({ seed, dealer: 0 });
+      if (g.phase.type !== 'discard') continue;
+      for (let step = 0; step < 200; step++) {
+        if (g.phase.type === 'finished') continue outer;
         if (g.phase.type === 'respond' && g.phase.source === 'discard') {
-          expect(legalEats(g).some((o) => o.kind === 'pair')).toBe(false);
-          checkedDiscards++;
+          const pair = legalEats(g).find((o) => o.kind === 'pair');
+          if (pair) {
+            const player = g.phase.player;
+            g = applyAction(g, { type: 'eat', player, option: pair });
+            const meld = g.players[player].melds[g.players[player].melds.length - 1];
+            expect(meld.kind).toBe('pair');
+            expect(meld.cards.length).toBe(2);
+            expect(totalCards(g)).toBe(DECK_SIZE);
+            return;
+          }
+          // Lone general is never offered on discards.
+          expect(legalEats(g).some((o) => o.kind === 'loneGeneral')).toBe(false);
         }
         g = applyAction(g, aiChooseAction(g));
       }
     }
-    expect(checkedDiscards).toBeGreaterThan(50);
+    throw new Error('No discard-pair opportunity found across seeds — suspicious');
   });
 
   it('lets a player set down a face-down set without consuming a turn', () => {

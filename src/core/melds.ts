@@ -197,12 +197,10 @@ export function winsWith(handCounts: readonly number[], offeredKind: number): bo
  * A way to capture ("ăn") an offered card: the meld formed and the card
  * kinds taken from hand to complete it.
  *
- * A discarded card may only be captured into a meld of 3+ cards — you cannot
- * take someone's discard just to pair it (pairs only complete a hand when
- * winning, which `winsWith` handles). A card you flip from the wall yourself
- * may additionally be captured into a pair with an identical hand card
- * ("chui đôi"), or — if it is a Tướng — played on its own as a lone general;
- * pass `allowPair` for those cases.
+ * Any offered card — a discard or a wall flip — may be captured into a pair
+ * with an identical hand card ("chui đôi"). A Tướng you flip from the wall
+ * yourself may additionally be played on its own as a lone general; pass
+ * `ownFlip` for that case.
  */
 export interface EatOption {
   kind: MeldKind;
@@ -214,15 +212,15 @@ export function eatOptions(
   handCounts: readonly number[],
   offeredKind: number,
   handSize: number,
-  allowPair = false,
+  ownFlip = false,
 ): EatOption[] {
   const opts: EatOption[] = [];
   const k = offeredKind;
   const rank = Math.floor(k / 4);
   const color = k % 4;
 
-  if (allowPair && rank === 0) opts.push({ kind: 'loneGeneral', fromHand: [] });
-  if (allowPair && handCounts[k] >= 1) opts.push({ kind: 'pair', fromHand: [k] });
+  if (ownFlip && rank === 0) opts.push({ kind: 'loneGeneral', fromHand: [] });
+  if (handCounts[k] >= 1) opts.push({ kind: 'pair', fromHand: [k] });
   if (handCounts[k] >= 2) opts.push({ kind: 'triple', fromHand: [k, k] });
   if (handCounts[k] >= 3) opts.push({ kind: 'quad', fromHand: [k, k, k] });
 

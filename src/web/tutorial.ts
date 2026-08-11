@@ -88,9 +88,9 @@ export function tutorialSlides(locale: Locale): Slide[] {
         body: `<p>Luôn có một lá được «mời» — lá vừa đánh ra hoặc lá lật từ nọc.</p>
         <p>Đến lượt, bạn có thể <strong>ăn</strong>: ghép lá mời với bài trên tay thành nhóm
         ≥ 3 lá, lật nhóm lên bàn, rồi đánh ra 1 lá.</p>${captureExample}
-        <p>Không ăn thì <strong>bỏ qua</strong>: lá mời bị bỏ, bạn bốc nọc. Lá tự bốc còn
-        được <strong>chui đôi</strong> với lá giống hệt trên tay. Lá nọc không ăn sẽ nhường
-        cho nhà kế tiếp.</p>`,
+        <p>Lá đang mời còn được <strong>chui đôi</strong> với lá giống hệt trên tay.</p>
+        <p>Không ăn thì <strong>bỏ qua</strong>: lá mời bị bỏ, bạn bốc nọc. Lá nọc không ăn
+        sẽ nhường cho nhà kế tiếp.</p>`,
       },
       {
         title: 'Tới & tính lệnh',
@@ -144,10 +144,10 @@ export function tutorialSlides(locale: Locale): Slide[] {
       from the wall.</p>
       <p>On your turn you may <strong>capture ("ăn")</strong>: combine the offered card with
       cards from your hand into a face-up group of 3+, then discard one card.</p>${captureExample}
-      <p>Or <strong>pass</strong>: the offer is burned and you flip the top wall card. A card
-      you flip yourself can also be captured into a <strong>pair</strong> with an identical
-      hand card ("chui đôi"). If you don't use the flipped card, it's offered to the next
-      player.</p>`,
+      <p>Any offered card can also be captured into a <strong>pair</strong> with an identical
+      hand card ("chui đôi").</p>
+      <p>Or <strong>pass</strong>: the offer is burned and you flip the top wall card. If you
+      don't use the flipped card, it's offered to the next player.</p>`,
     },
     {
       title: 'Winning & scoring',

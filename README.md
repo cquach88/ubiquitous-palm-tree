@@ -94,9 +94,9 @@ entire hand into valid groups ("bộ"):
 
 Each turn a card is on offer (the previous discard, or a card flipped from the
 wall). You may **capture it ("ăn")** into a face-up meld of 3+ cards and then
-discard, or pass. A card you flip from the wall yourself may additionally be
-captured into a **pair** with an identical hand card ("chui đôi") — discards
-can never be taken just to pair them. You may also **set down** complete sets
+discard, or pass. Any offered card may additionally be captured into a
+**pair** with an identical hand card ("chui đôi"), and a Tướng flipped from
+the wall may be played on its own. You may also **set down** complete sets
 of 3+ from your hand face-down at any time ("úp bộ"): opponents see only the
 backs, the cards are locked in, and the sets score their full concealed lệnh
 when you win. The first player whose full hand is completed by an offered

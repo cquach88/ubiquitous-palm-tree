@@ -156,12 +156,12 @@ describe('winsWith', () => {
 });
 
 describe('eatOptions', () => {
-  it('offers triple and quad from identical cards, never a bare pair', () => {
+  it('offers pair, triple, and quad from identical cards', () => {
     const hand = counts(K('cannon', 'green'), K('cannon', 'green'), K('cannon', 'green'));
     const opts = eatOptions(hand, K('cannon', 'green'), 10);
-    expect(opts.map((o) => o.kind).sort()).toEqual(['quad', 'triple']);
+    expect(opts.map((o) => o.kind).sort()).toEqual(['pair', 'quad', 'triple']);
     const single = counts(K('cannon', 'green'));
-    expect(eatOptions(single, K('cannon', 'green'), 10)).toEqual([]);
+    expect(eatOptions(single, K('cannon', 'green'), 10).map((o) => o.kind)).toEqual(['pair']);
   });
   it('offers runs', () => {
     const hand = counts(K('general', 'red'), K('elephant', 'red'));
@@ -176,23 +176,40 @@ describe('eatOptions', () => {
   });
   it('forbids captures that leave nothing to discard', () => {
     const hand = counts(K('cannon', 'green'), K('cannon', 'green'));
-    expect(eatOptions(hand, K('cannon', 'green'), 2)).toEqual([]);
-    expect(eatOptions(hand, K('cannon', 'green'), 3).map((o) => o.kind)).toEqual(['triple']);
+    // Hand of 2: the triple (consumes both) would leave nothing to discard.
+    expect(eatOptions(hand, K('cannon', 'green'), 2).map((o) => o.kind)).toEqual(['pair']);
+    expect(eatOptions(hand, K('cannon', 'green'), 3).map((o) => o.kind).sort()).toEqual([
+      'pair',
+      'triple',
+    ]);
+    expect(eatOptions(counts(K('cannon', 'green')), K('cannon', 'green'), 1)).toEqual([]);
   });
-  it('allows pairing only when allowPair is set (own wall flip)', () => {
+  it('allows pairing any offered card with an identical hand card', () => {
     const one = counts(K('horse', 'white'));
-    expect(eatOptions(one, K('horse', 'white'), 10)).toEqual([]);
+    // Both discards and own wall flips can be paired.
+    expect(eatOptions(one, K('horse', 'white'), 10)).toEqual([
+      { kind: 'pair', fromHand: [K('horse', 'white')] },
+    ]);
     expect(eatOptions(one, K('horse', 'white'), 10, true)).toEqual([
       { kind: 'pair', fromHand: [K('horse', 'white')] },
     ]);
-    // With two in hand, the wall flip offers pair, triple — never for discards.
     const two = counts(K('horse', 'white'), K('horse', 'white'));
-    expect(eatOptions(two, K('horse', 'white'), 10, true).map((o) => o.kind).sort()).toEqual(
+    expect(eatOptions(two, K('horse', 'white'), 10).map((o) => o.kind).sort()).toEqual(
       ['pair', 'triple'],
     );
-    expect(eatOptions(two, K('horse', 'white'), 10).map((o) => o.kind)).toEqual(['triple']);
     // Pairing still requires a card left to discard.
     expect(eatOptions(one, K('horse', 'white'), 1, true)).toEqual([]);
+  });
+  it('offers both the run and the pair on a discarded set member', () => {
+    // Hand: Tướng vàng, Sĩ vàng ×2, Tượng vàng — a discarded Tượng vàng can be
+    // paired (keeping the Sĩ pair and lone Tướng) or taken into the run.
+    const hand = counts(
+      K('general', 'yellow'),
+      K('advisor', 'yellow'), K('advisor', 'yellow'),
+      K('elephant', 'yellow'),
+    );
+    const kinds = eatOptions(hand, K('elephant', 'yellow'), 20).map((o) => o.kind).sort();
+    expect(kinds).toEqual(['pair', 'tst']);
   });
   it('allows playing a lone Tướng from own wall flip only', () => {
     const empty = counts();

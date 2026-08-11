@@ -181,7 +181,7 @@ const en = {
     <ul>
       <li>The dealer opens by discarding a card. A discarded card is offered to the next player.</li>
       <li>That player may <strong>capture</strong> it ("ăn") — combining it with hand cards into a face-up group of 3+ — and then discard, or <strong>pass</strong> and flip a card from the wall.</li>
-      <li>A card you flip from the wall yourself may also be captured into a <strong>pair</strong> with an identical card from your hand ("chui đôi"). Discarded cards can never be taken just to pair them.</li>
+      <li>Any offered card may also be captured into a <strong>pair</strong> with an identical card from your hand ("chui đôi"), and a Tướng you flip from the wall yourself may be played on its own.</li>
       <li>At any time you may <strong>set down</strong> complete sets of 3+ from your hand face-down (🔒 "úp bộ"): others see only the backs, and the sets score their full concealed lệnh when you win.</li>
       <li>A flipped wall card they don't use is offered to the next player.</li>
       <li>If an offered card completes someone's whole hand, they <strong>win ("tới")</strong> instantly — the game detects this for you.</li>
@@ -362,7 +362,7 @@ const vi: typeof en = {
     <ul>
       <li>Nhà cái đánh 1 lá mở màn. Lá đánh ra được mời nhà kế tiếp.</li>
       <li>Người được mời có thể <strong>ăn</strong> (ghép thành nhóm ≥ 3 lá, lật lên bàn rồi đánh 1 lá) hoặc <strong>bỏ qua</strong> và bốc nọc.</li>
-      <li>Lá tự bốc từ nọc còn có thể <strong>chui đôi</strong> — ghép với một lá giống hệt trên tay thành đôi lật lên bàn. Bài người khác đánh ra thì không được ăn chỉ để tạo đôi.</li>
+      <li>Lá đang mời còn có thể <strong>chui đôi</strong> — ghép với một lá giống hệt trên tay thành đôi lật lên bàn. Tướng tự bốc từ nọc có thể chốt lẻ một mình.</li>
       <li>Bất cứ lúc nào bạn cũng có thể <strong>úp bộ</strong> (🔒): đặt bộ đủ 3+ lá xuống bàn úp mặt — người khác chỉ thấy lưng bài, và bộ ăn đủ lệnh kín khi bạn tới.</li>
       <li>Lá nọc không ăn sẽ được nhường cho nhà kế tiếp.</li>
       <li>Ai ghép được lá đang mời để hoàn thành toàn bộ bài thì <strong>tới</strong> ngay (máy tự phát hiện).</li>
