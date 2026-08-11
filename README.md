@@ -50,6 +50,14 @@ choose *Join a game* and enter the same code. Up to 4 players — empty seats
 are played by bots, and a player who drops mid-game is taken over by a bot.
 Only the host can start rounds.
 
+The room is a **session**: the point tally resets whenever you host or join a
+new room, and tracks **player identities** rather than seats — someone who
+leaves (or is kicked) and rejoins from the same browser tab gets their points
+back, while a bot filling their seat scores separately. The host can **kick**
+any player from the lobby dialog and **reset the tally** at any time (there's
+also a reset button for the solo tally). A **chat panel** below the game log
+lets everyone at the table talk during play.
+
 How it works: connections are peer-to-peer WebRTC data channels (PeerJS, using
 its free public signaling cloud), so no game server is needed and it works
 from the static GitHub Pages deployment. The host is authoritative — it runs

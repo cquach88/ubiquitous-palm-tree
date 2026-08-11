@@ -22,6 +22,8 @@ export type NetMsg =
   | { t: 'lobby'; seats: (string | null)[]; yourSeat: number }
   | { t: 'state'; state: GameState; chips: number[]; names: (string | null)[] }
   | { t: 'action'; action: Action }
+  | { t: 'chat'; seat: number; name: string; text: string }
+  | { t: 'kicked' }
   | { t: 'full' };
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -73,6 +75,7 @@ export interface HostHandlers {
   onJoin(seat: number, name: string): void;
   onLeave(seat: number): void;
   onAction(seat: number, action: Action): void;
+  onChat(seat: number, text: string): void;
   onError(message: string, type: string): void;
 }
 
@@ -131,12 +134,29 @@ export class HostNet {
       } else if (msg.t === 'action') {
         const seat = this.conns.indexOf(conn);
         if (seat > 0) this.handlers.onAction(seat, msg.action);
+      } else if (msg.t === 'chat') {
+        const seat = this.conns.indexOf(conn);
+        if (seat > 0) this.handlers.onChat(seat, String(msg.text ?? ''));
       }
     });
   }
 
   getTokens(): (string | null)[] {
     return this.tokens.slice();
+  }
+
+  /** Token of the guest currently connected in a seat (null for bots/host). */
+  connectedTokenOf(seat: number): string | null {
+    return this.conns[seat] ? this.tokens[seat] : null;
+  }
+
+  /** Remove a guest: tell them, drop the connection, forget their seat claim. */
+  kick(seat: number): void {
+    const conn = this.conns[seat];
+    if (!conn) return;
+    conn.send({ t: 'kicked' } satisfies NetMsg);
+    this.tokens[seat] = null;
+    setTimeout(() => conn.close(), 300);
   }
 
   connectedSeats(): boolean[] {
@@ -155,6 +175,8 @@ export class HostNet {
 export interface GuestHandlers {
   onLobby(seats: (string | null)[], yourSeat: number): void;
   onState(state: GameState, chips: number[], names: (string | null)[]): void;
+  onChat(seat: number, name: string, text: string): void;
+  onKicked(): void;
   onFull(): void;
   onClose(): void;
   onError(message: string, type: string): void;
@@ -181,6 +203,8 @@ export class GuestNet {
         const msg = data as NetMsg;
         if (msg.t === 'lobby') this.handlers.onLobby(msg.seats, msg.yourSeat);
         else if (msg.t === 'state') this.handlers.onState(msg.state, msg.chips, msg.names);
+        else if (msg.t === 'chat') this.handlers.onChat(msg.seat, msg.name, msg.text);
+        else if (msg.t === 'kicked') this.handlers.onKicked();
         else if (msg.t === 'full') this.handlers.onFull();
       });
     });
@@ -188,6 +212,10 @@ export class GuestNet {
 
   send(action: Action): void {
     this.conn?.send({ t: 'action', action } satisfies NetMsg);
+  }
+
+  sendChat(text: string): void {
+    this.conn?.send({ t: 'chat', seat: -1, name: '', text } satisfies NetMsg);
   }
 
   close(): void {

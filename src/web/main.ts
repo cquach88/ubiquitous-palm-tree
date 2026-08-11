@@ -152,6 +152,8 @@ interface HostSnapshot {
   mpStarted: boolean;
   dealer: number;
   settled: boolean;
+  ledger: Record<string, number>;
+  chat: ChatMsg[];
 }
 
 interface GuestSnapshot {
@@ -164,6 +166,79 @@ interface GuestSnapshot {
 let reconnecting = false;
 let reconnectTries = 0;
 const MAX_RECONNECT_TRIES = 20;
+
+// ---------- session tally (online) ----------
+
+/**
+ * Online points are kept per PLAYER IDENTITY, not per seat: the host seat is
+ * 'host', a connected guest is their stable token, an empty seat is
+ * 'bot:<seat>'. A player who leaves and rejoins (same tab) gets their points
+ * back; the tally resets when a new room is hosted or joined.
+ */
+let ledger: Record<string, number> = {};
+
+function seatLedgerKey(seat: number): string {
+  if (seat === 0) return 'host';
+  return host?.connectedTokenOf(seat) ?? `bot:${seat}`;
+}
+
+function syncChipsFromLedger(): void {
+  chips = Array.from({ length: NUM_PLAYERS }, (_, s) => ledger[seatLedgerKey(s)] ?? 0);
+}
+
+// ---------- chat ----------
+
+interface ChatMsg {
+  seat: number;
+  name: string;
+  text: string;
+}
+
+let chatLog: ChatMsg[] = [];
+let chatDraft = '';
+let chatFocused = false;
+
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
+function appendChat(msg: ChatMsg): void {
+  const text = msg.text.trim().slice(0, 300);
+  if (!text) return;
+  chatLog.push({ ...msg, text });
+  if (chatLog.length > 100) chatLog.shift();
+}
+
+/** Host-side: record a chat line and relay it to every guest. */
+function pushChat(seat: number, text: string): void {
+  const clean = text.trim().slice(0, 300);
+  if (!clean) return;
+  const name = seat === 0 ? myName || 'Host' : mpNames[seat] ?? `Player ${seat + 1}`;
+  appendChat({ seat, name, text: clean });
+  if (netMode === 'host' && host) {
+    const connected = host.connectedSeats();
+    for (let s = 1; s < NUM_PLAYERS; s++) {
+      if (connected[s]) host.sendTo(s, { t: 'chat', seat, name, text: clean });
+    }
+    saveHostSnapshot();
+  }
+  render();
+}
+
+function sendChatMsg(): void {
+  const text = chatDraft.trim();
+  chatDraft = '';
+  if (!text) {
+    render();
+    return;
+  }
+  if (netMode === 'host') {
+    pushChat(0, text);
+  } else if (netMode === 'guest') {
+    guest?.sendChat(text);
+    render();
+  }
+}
 
 // ---------- error logging ----------
 
@@ -221,6 +296,8 @@ function saveHostSnapshot(): void {
     mpStarted,
     dealer,
     settled,
+    ledger,
+    chat: chatLog,
   } satisfies HostSnapshot);
 }
 
@@ -230,6 +307,7 @@ function saveGuestSnapshot(): void {
   ssSet('tusac-guestgame', { state, chips, mpNames, mySeat } satisfies GuestSnapshot);
 }
 
+/** Seat names for rendering — HTML-escaped, since names are user input. */
 function displayNames(): string[] {
   const names: string[] = [];
   for (let s = 0; s < NUM_PLAYERS; s++) {
@@ -237,7 +315,7 @@ function displayNames(): string[] {
     else if (netMode !== 'solo' && mpNames[s]) names.push(mpNames[s]!);
     else names.push(`${t().bot} ${s}`);
   }
-  return names;
+  return names.map(esc);
 }
 
 // ---------- game driving ----------
@@ -316,8 +394,17 @@ function onFinished(): void {
     if (winner !== null && score) {
       // Winner-take-only tally: the winner banks their round score; nobody
       // else gains or loses anything.
-      chips = chips.map((c, p) => (p === winner ? c + score.lenh : c));
-      saveJSON('tusac-chips', chips);
+      if (netMode === 'host') {
+        // Credit the player identity in that seat, so points survive
+        // leaving and rejoining. Never written to localStorage — the online
+        // tally lives and dies with the room.
+        const key = seatLedgerKey(winner);
+        ledger[key] = (ledger[key] ?? 0) + score.lenh;
+        syncChipsFromLedger();
+      } else {
+        chips = chips.map((c, p) => (p === winner ? c + score.lenh : c));
+        saveJSON('tusac-chips', chips);
+      }
       dealer = winner;
     }
   }
@@ -379,12 +466,16 @@ function createHostNet(code: string, tokens?: (string | null)[]): void {
       },
       onJoin: (seat, name) => {
         mpNames[seat] = name;
+        const token = host?.connectedTokenOf(seat);
+        if (token) ledger[token] = ledger[token] ?? 0;
+        syncChipsFromLedger();
         broadcastLobby();
         if (mpStarted) broadcastState();
         render();
       },
       onLeave: (seat) => {
         mpNames[seat] = null;
+        syncChipsFromLedger();
         broadcastLobby();
         if (mpStarted) {
           broadcastState();
@@ -392,6 +483,7 @@ function createHostNet(code: string, tokens?: (string | null)[]): void {
         }
         render();
       },
+      onChat: (seat, text) => pushChat(seat, text),
       onAction: (seat, action) => {
         if (netMode !== 'host' || !mpStarted) return;
         if (!action || action.player !== seat) return;
@@ -416,6 +508,10 @@ function startHosting(): void {
   mpNames[0] = myName || 'Host';
   mpStarted = false;
   netError = '';
+  // A new room starts a fresh player session: tally and chat reset.
+  ledger = {};
+  chips = new Array(NUM_PLAYERS).fill(0);
+  chatLog = [];
   onlineView = 'hostLobby';
   createHostNet(roomCode);
   saveHostSnapshot();
@@ -455,6 +551,15 @@ function createGuestNet(code: string): void {
         settled = false;
       }
       render();
+    },
+    onChat: (seat, name, text) => {
+      appendChat({ seat, name, text });
+      render();
+    },
+    onKicked: () => {
+      netError = t().kickedMsg;
+      clearOnlineSession();
+      backToSolo();
     },
     onFull: () => {
       netError = t().roomFull;
@@ -498,6 +603,10 @@ function joinGame(code: string): void {
   netError = '';
   reconnecting = false;
   reconnectTries = 0;
+  // Joining a room starts a fresh session view: the host's tally replaces
+  // any local one, and chat starts clean.
+  chips = new Array(NUM_PLAYERS).fill(0);
+  chatLog = [];
   onlineView = 'guestLobby';
   createGuestNet(code);
   render();
@@ -521,6 +630,10 @@ function leaveOnline(restart: boolean): void {
   reconnectTries = 0;
   mpNames = new Array(NUM_PLAYERS).fill(null);
   roomCode = '';
+  chatLog = [];
+  ledger = {};
+  // Back in solo: restore the locally-saved solo tally.
+  chips = loadJSON('tusac-chips', new Array(NUM_PLAYERS).fill(0));
   if (restart) {
     clearOnlineSession();
     onlineView = null;
@@ -569,6 +682,8 @@ function tryRestoreOnline(): boolean {
   chips = snap.chips;
   settled = snap.settled;
   state = snap.state;
+  ledger = snap.ledger ?? {};
+  chatLog = snap.chat ?? [];
   gameSeed = state.seed;
   gameDealer = state.dealer;
   actionHistory = [];
@@ -765,7 +880,23 @@ function centerHTML(): string {
       .slice(-60)
       .map((e) => `<div>${t().logLine(e, N)}</div>`)
       .join('')}</div>
+    ${netMode !== 'solo' ? chatHTML() : ''}
   </section>`;
+}
+
+function chatHTML(): string {
+  const s = t();
+  return `<div class="chat-box">
+    <div class="chat-list" id="chat-list">${
+      chatLog
+        .map((m) => `<div class="chat-row"><b>${esc(m.name)}</b> ${esc(m.text)}</div>`)
+        .join('') || `<span class="chat-empty">${s.chatEmpty}</span>`
+    }</div>
+    <div class="chat-input-row">
+      <input id="chat-input" maxlength="300" placeholder="${s.chatPlaceholder}" value="${esc(chatDraft)}" autocomplete="off" />
+      <button data-action="send-chat">${s.chatSend}</button>
+    </div>
+  </div>`;
 }
 
 function eatOptionHTML(opt: EatOption, index: number, suggested: boolean): string {
@@ -854,7 +985,9 @@ function tallyHTML(winner: number | null): string {
         `<tr><td>${p === winner ? '🏆 ' : ''}${N[p]}</td><td>${chips[p]}</td></tr>`,
     )
     .join('');
-  return `<h3>${s.tallyTitle}</h3><table class="score-table">${rows}</table>`;
+  const resetBtn =
+    netMode === 'guest' ? '' : ` <button class="tiny" data-action="reset-tally">${s.resetTally}</button>`;
+  return `<h3>${s.tallyTitle}${resetBtn}</h3><table class="score-table">${rows}</table>`;
 }
 
 function resultDialogHTML(): string {
@@ -922,8 +1055,13 @@ function onlineDialogHTML(): string {
     const N = displayNames();
     const list = Array.from({ length: NUM_PLAYERS }, (_, seat) => {
       const filled = seat === 0 || mpNames[seat];
-      const label = seat === mySeat ? `${N[seat]} ★` : filled ? (mpNames[seat] ?? N[seat]) : s.emptySeat;
-      return `<li class="${filled ? 'filled' : 'empty'}">${seat + 1}. ${label}</li>`;
+      const label = seat === mySeat ? `${N[seat]} ★` : filled ? N[seat] : s.emptySeat;
+      const pts = ` <span class="lobby-pts">${chips[seat]} ${locale === 'vi' ? 'điểm' : 'pts'}</span>`;
+      const kickBtn =
+        onlineView === 'hostLobby' && seat > 0 && mpNames[seat]
+          ? ` <button class="tiny danger" data-action="kick-seat" data-seat="${seat}">${s.kick}</button>`
+          : '';
+      return `<li class="${filled ? 'filled' : 'empty'}">${seat + 1}. ${label}${pts}${kickBtn}</li>`;
     }).join('');
     const codeBlock =
       onlineView === 'hostLobby'
@@ -935,12 +1073,17 @@ function onlineDialogHTML(): string {
       onlineView === 'hostLobby' && !mpStarted
         ? `<button class="primary" data-action="start-online">${s.startOnline}</button>`
         : '';
+    const resetBtn =
+      onlineView === 'hostLobby'
+        ? `<button data-action="reset-tally">${s.resetTally}</button>`
+        : '';
     body = `${err}
       ${codeBlock}
       <h3>${s.playersInLobby}</h3>
       <ul class="lobby-list">${list}</ul>
       <div class="dialog-actions">
         <button data-action="leave-online">${s.leave}</button>
+        ${resetBtn}
         <button data-action="close-dialog">${s.viewTable}</button>
         ${startBtn}
       </div>`;
@@ -953,7 +1096,7 @@ function nameDialogHTML(): string {
   const s = t();
   return `<dialog id="name-dialog">
     <h2>${s.nameTitle}</h2>
-    <input id="name-input" maxlength="20" placeholder="${s.namePlaceholder}" value="${nameDraft}" />
+    <input id="name-input" maxlength="20" placeholder="${s.namePlaceholder}" value="${esc(nameDraft)}" />
     <div class="dialog-actions">
       <button data-action="close-dialog">${s.cancel}</button>
       <button class="primary" data-action="save-name">${s.save}</button>
@@ -1062,6 +1205,16 @@ function render(): void {
   `;
   const log = document.getElementById('log');
   if (log) log.scrollTop = log.scrollHeight;
+  const chat = document.getElementById('chat-list');
+  if (chat) chat.scrollTop = chat.scrollHeight;
+  if (chatFocused) {
+    const input = document.getElementById('chat-input') as HTMLInputElement | null;
+    if (input) {
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    }
+  }
   reattachDrag();
   if (tutorialStep !== null) {
     (document.getElementById('tutorial-dialog') as HTMLDialogElement | null)?.showModal();
@@ -1097,6 +1250,21 @@ document.addEventListener('input', (ev) => {
   const el = ev.target as HTMLInputElement;
   if (el.id === 'join-code') joinCodeDraft = normalizeCode(el.value);
   if (el.id === 'name-input') nameDraft = el.value;
+  if (el.id === 'chat-input') chatDraft = el.value;
+});
+
+document.addEventListener('keydown', (ev) => {
+  if ((ev.target as HTMLElement).id === 'chat-input' && ev.key === 'Enter') {
+    ev.preventDefault();
+    sendChatMsg();
+  }
+});
+
+document.addEventListener('focusin', (ev) => {
+  if ((ev.target as HTMLElement).id === 'chat-input') chatFocused = true;
+});
+document.addEventListener('focusout', (ev) => {
+  if ((ev.target as HTMLElement).id === 'chat-input') chatFocused = false;
 });
 
 // Keep UI state in sync when dialogs close via Escape.
@@ -1263,6 +1431,31 @@ document.addEventListener('click', (ev) => {
       clearErrors();
       render();
       break;
+    case 'send-chat':
+      sendChatMsg();
+      break;
+    case 'reset-tally':
+      if (netMode === 'guest') break;
+      if (netMode === 'host') {
+        ledger = {};
+        syncChipsFromLedger();
+        broadcastLobby();
+        broadcastState();
+      } else {
+        chips = new Array(NUM_PLAYERS).fill(0);
+        saveJSON('tusac-chips', chips);
+      }
+      render();
+      break;
+    case 'kick-seat': {
+      const seat = Number(target.dataset.seat);
+      if (netMode === 'host' && seat > 0) {
+        host?.kick(seat);
+        mpNames[seat] = null;
+        render();
+      }
+      break;
+    }
     case 'close-dialog':
       target.closest('dialog')?.close();
       render();

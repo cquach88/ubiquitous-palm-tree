@@ -125,6 +125,13 @@ const en = {
   hostOnlyNewGame: 'Only the host can start the next round.',
   reconnecting: 'Connection lost — reconnecting…',
 
+  resetTally: 'Reset tally',
+  kick: 'Kick',
+  kickedMsg: 'The host removed you from the game.',
+  chatEmpty: 'Say hi to the table!',
+  chatPlaceholder: 'Message…',
+  chatSend: 'Send',
+
   errorRecorded: 'Something went wrong — an error was recorded.',
   reportProblem: 'Report a problem',
   reportTitle: 'Report a problem',
@@ -287,6 +294,13 @@ const vi: typeof en = {
   onlineBadge: (code) => `Online · ${code}`,
   hostOnlyNewGame: 'Chỉ chủ phòng mới bắt đầu được ván mới.',
   reconnecting: 'Mất kết nối — đang kết nối lại…',
+
+  resetTally: 'Xóa bảng điểm',
+  kick: 'Mời ra',
+  kickedMsg: 'Chủ phòng đã mời bạn ra khỏi phòng.',
+  chatEmpty: 'Chào cả bàn đi!',
+  chatPlaceholder: 'Nhắn tin…',
+  chatSend: 'Gửi',
 
   errorRecorded: 'Có lỗi xảy ra — đã ghi lại nhật ký lỗi.',
   reportProblem: 'Báo lỗi',
