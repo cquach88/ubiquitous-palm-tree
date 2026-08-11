@@ -125,6 +125,12 @@ const en = {
   hostOnlyNewGame: 'Only the host can start the next round.',
   reconnecting: 'Connection lost — reconnecting…',
 
+  declareBtn: '🔒 Set down',
+  declareTitle: 'Set down hidden sets',
+  declareIntro:
+    'Place complete sets of 3+ cards from your hand face-down on your field. Other players see only the backs; you still see the faces. They score their full concealed lệnh when you win, and the cards are locked in — they cannot return to your hand.',
+  declareNone: 'No complete sets of 3+ in your hand right now.',
+
   resetTally: 'Reset tally',
   sizeLabel: (n: number) => `👥 ${n}`,
   sizeTitle: 'Players at the table (3 or 4) — bots fill empty seats',
@@ -153,6 +159,7 @@ const en = {
       case 'draw': return `${names[e.player]} drew from the wall: ${kindName(e.kind)}.`;
       case 'relay': return `${names[e.player]} passed ${kindName(e.kind)} on.`;
       case 'eat': return `${names[e.player]} captured ${kindName(e.kind)} (${en.eatLabel[e.meld]}).`;
+      case 'declare': return `${names[e.player]} set down a hidden set (${e.size} cards).`;
       case 'win': return `${names[e.player]} — TỚI with ${kindName(e.kind)}: ${e.lenh} lệnh!`;
       case 'wall-empty': return 'Wall empty — draw game.';
     }
@@ -175,6 +182,7 @@ const en = {
       <li>The dealer opens by discarding a card. A discarded card is offered to the next player.</li>
       <li>That player may <strong>capture</strong> it ("ăn") — combining it with hand cards into a face-up group of 3+ — and then discard, or <strong>pass</strong> and flip a card from the wall.</li>
       <li>A card you flip from the wall yourself may also be captured into a <strong>pair</strong> with an identical card from your hand ("chui đôi"). Discarded cards can never be taken just to pair them.</li>
+      <li>At any time you may <strong>set down</strong> complete sets of 3+ from your hand face-down (🔒 "úp bộ"): others see only the backs, and the sets score their full concealed lệnh when you win.</li>
       <li>A flipped wall card they don't use is offered to the next player.</li>
       <li>If an offered card completes someone's whole hand, they <strong>win ("tới")</strong> instantly — the game detects this for you.</li>
       <li>If the wall runs out, the round is a draw.</li>
@@ -299,6 +307,12 @@ const vi: typeof en = {
   hostOnlyNewGame: 'Chỉ chủ phòng mới bắt đầu được ván mới.',
   reconnecting: 'Mất kết nối — đang kết nối lại…',
 
+  declareBtn: '🔒 Úp bộ',
+  declareTitle: 'Úp bộ kín',
+  declareIntro:
+    'Đặt các bộ đủ 3+ lá từ tay xuống bàn úp mặt. Người khác chỉ thấy lưng bài; bạn vẫn thấy mặt bài. Khi bạn tới, các bộ này ăn đủ lệnh kín, và lá đã úp không rút lại được.',
+  declareNone: 'Trên tay chưa có bộ đủ 3+ lá.',
+
   resetTally: 'Xóa bảng điểm',
   sizeLabel: (n) => `👥 ${n}`,
   sizeTitle: 'Số người chơi (3 hoặc 4) — ghế trống do máy chơi',
@@ -327,6 +341,7 @@ const vi: typeof en = {
       case 'draw': return `${names[e.player]} bốc nọc: ${kindName(e.kind)}.`;
       case 'relay': return `${names[e.player]} không ăn, nhường ${kindName(e.kind)}.`;
       case 'eat': return `${names[e.player]} ăn ${kindName(e.kind)} (${vi.eatLabel[e.meld]}).`;
+      case 'declare': return `${names[e.player]} úp một bộ kín (${e.size} lá).`;
       case 'win': return `${names[e.player]} TỚI với ${kindName(e.kind)} — ${e.lenh} lệnh!`;
       case 'wall-empty': return 'Hết nọc — ván hòa.';
     }
@@ -348,6 +363,7 @@ const vi: typeof en = {
       <li>Nhà cái đánh 1 lá mở màn. Lá đánh ra được mời nhà kế tiếp.</li>
       <li>Người được mời có thể <strong>ăn</strong> (ghép thành nhóm ≥ 3 lá, lật lên bàn rồi đánh 1 lá) hoặc <strong>bỏ qua</strong> và bốc nọc.</li>
       <li>Lá tự bốc từ nọc còn có thể <strong>chui đôi</strong> — ghép với một lá giống hệt trên tay thành đôi lật lên bàn. Bài người khác đánh ra thì không được ăn chỉ để tạo đôi.</li>
+      <li>Bất cứ lúc nào bạn cũng có thể <strong>úp bộ</strong> (🔒): đặt bộ đủ 3+ lá xuống bàn úp mặt — người khác chỉ thấy lưng bài, và bộ ăn đủ lệnh kín khi bạn tới.</li>
       <li>Lá nọc không ăn sẽ được nhường cho nhà kế tiếp.</li>
       <li>Ai ghép được lá đang mời để hoàn thành toàn bộ bài thì <strong>tới</strong> ngay (máy tự phát hiện).</li>
       <li>Hết nọc mà chưa ai tới thì hòa.</li>

@@ -121,6 +121,7 @@ export function bestScoringDecomposition(countsIn: readonly number[]): DecompRes
 
 /**
  * Score a win. `exposedMelds` are the winner's captured melds on the table;
+ * `declaredMelds` are their face-down sets (scored at concealed value);
  * `handCounts` is the concealed hand; `wonKind` is the claimed card's kind
  * (already included in handCounts), or null for a dealt win (thiên tới).
  *
@@ -130,6 +131,7 @@ export function bestScoringDecomposition(countsIn: readonly number[]): DecompRes
 export function scoreWin(
   winner: number,
   exposedMelds: { kind: MeldKind; uses: number[] }[],
+  declaredMelds: { kind: MeldKind; uses: number[] }[],
   handCounts: readonly number[],
   wonKind: number | null,
 ): ScoreResult {
@@ -141,6 +143,15 @@ export function scoreWin(
       uses: m.uses,
       concealed: false,
       lenh: MELD_LENH[m.kind].exposed,
+    });
+  }
+
+  for (const m of declaredMelds) {
+    breakdown.push({
+      kind: m.kind,
+      uses: m.uses,
+      concealed: true,
+      lenh: MELD_LENH[m.kind].concealed,
     });
   }
 

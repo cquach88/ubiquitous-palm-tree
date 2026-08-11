@@ -68,6 +68,7 @@ let myName: string = loadJSON('tusac-name', '');
 let tableSize: number = Math.min(4, Math.max(3, loadJSON('tusac-size', 4)));
 let tutorialStep: number | null = null;
 let manualOrder: number[] = [];
+let declareOpen = false;
 
 // multiplayer
 let netMode: NetMode = 'solo';
@@ -773,6 +774,32 @@ function sameEat(a: EatOption, b: EatOption): boolean {
   );
 }
 
+// ---------- face-down declared sets ----------
+
+/** Complete sets of 3+ cards in my hand that could be set down face-down. */
+function declarableSets(): EatOption[] {
+  if (state.phase.type === 'finished') return [];
+  const hand = state.players[mySeat].hand;
+  const counts = toCounts(hand);
+  const opts: EatOption[] = [];
+  for (let k = 0; k < counts.length; k++) {
+    if (counts[k] >= 4) opts.push({ kind: 'quad', fromHand: [k, k, k, k] });
+    else if (counts[k] >= 3) opts.push({ kind: 'triple', fromHand: [k, k, k] });
+  }
+  for (let col = 0; col < 4; col++) {
+    if (counts[col] > 0 && counts[4 + col] > 0 && counts[8 + col] > 0) {
+      opts.push({ kind: 'tst', fromHand: [col, 4 + col, 8 + col] });
+    }
+    if (counts[12 + col] > 0 && counts[16 + col] > 0 && counts[20 + col] > 0) {
+      opts.push({ kind: 'xpm', fromHand: [12 + col, 16 + col, 20 + col] });
+    }
+  }
+  const pawnKinds = [24, 25, 26, 27].filter((k) => counts[k] > 0);
+  if (pawnKinds.length === 4) opts.push({ kind: 'pawns4', fromHand: pawnKinds });
+  else if (pawnKinds.length === 3) opts.push({ kind: 'pawns3', fromHand: pawnKinds });
+  return opts.filter((o) => hand.length - o.fromHand.length >= 1);
+}
+
 // ---------- hand sorting ----------
 
 const byKind = (a: Card, b: Card) => kindOf(a) - kindOf(b) || a.id - b.id;
@@ -856,11 +883,22 @@ function backsHTML(n: number, max = 12): string {
 }
 
 function meldsHTML(player: number): string {
-  const melds = state.players[player].melds;
-  if (melds.length === 0) return '';
-  return `<div class="melds">${melds
+  const p = state.players[player];
+  if (p.melds.length === 0 && p.declared.length === 0) return '';
+  const exposed = p.melds
     .map((m) => `<div class="meld">${m.cards.map((c) => cardHTML(c, 'mini')).join('')}</div>`)
-    .join('')}</div>`;
+    .join('');
+  // Declared sets: the owner sees the faces (with a lock), others see backs.
+  const declared = p.declared
+    .map((m) => {
+      const inner =
+        player === mySeat
+          ? m.cards.map((c) => cardHTML(c, 'mini')).join('')
+          : m.cards.map(() => '<div class="card mini back"></div>').join('');
+      return `<div class="meld declared"><span class="lock">🔒</span>${inner}</div>`;
+    })
+    .join('');
+  return `<div class="melds">${exposed}${declared}</div>`;
 }
 
 function chipsHTML(player: number): string {
@@ -1010,6 +1048,7 @@ function humanSeatHTML(): string {
       ${state.dealer === mySeat ? `<span class="badge">${t().dealer}</span>` : ''}
       ${chipsHTML(mySeat)}
       <button class="tiny" data-action="cycle-sort" title="${t().dragHint}">${t().sortLabel[sortMode]}</button>
+      ${declarableSets().length > 0 ? `<button class="tiny" data-action="open-declare" title="${t().declareTitle}">${t().declareBtn}</button>` : ''}
       <span class="hand-count" style="margin-left:auto">${t().oddCards(leftovers)}</span>
     </div>
     ${meldsHTML(mySeat)}
@@ -1148,6 +1187,28 @@ function onlineDialogHTML(): string {
   return `<dialog id="online-dialog"><h2>${s.onlineTitle}</h2>${body}</dialog>`;
 }
 
+function declareDialogHTML(): string {
+  if (!declareOpen) return '';
+  const s = t();
+  const sets = declarableSets();
+  const list = sets
+    .map(
+      (o, i) => `<button class="eat-opt" data-action="declare-set" data-idx="${i}">
+        <span class="opt-label">${s.eatLabel[o.kind]}</span>
+        ${o.fromHand.map((k) => kindCardHTML(k)).join('')}
+      </button>`,
+    )
+    .join('');
+  return `<dialog id="declare-dialog">
+    <h2>${s.declareTitle}</h2>
+    <p>${s.declareIntro}</p>
+    <div class="actions" style="margin-top:10px">${list || `<span class="hint">${s.declareNone}</span>`}</div>
+    <div class="dialog-actions">
+      <button class="primary" data-action="close-dialog">${locale === 'vi' ? 'Đóng' : 'Close'}</button>
+    </div>
+  </dialog>`;
+}
+
 function nameDialogHTML(): string {
   if (!nameDialogOpen) return '';
   const s = t();
@@ -1259,6 +1320,7 @@ function render(): void {
     ${tutorialDialogHTML()}
     ${onlineDialogHTML()}
     ${nameDialogHTML()}
+    ${declareDialogHTML()}
     ${reportDialogHTML()}
     ${errorToastHTML()}
   `;
@@ -1286,6 +1348,9 @@ function render(): void {
   }
   if (reportOpen) {
     (document.getElementById('report-dialog') as HTMLDialogElement | null)?.showModal();
+  }
+  if (declareOpen) {
+    (document.getElementById('declare-dialog') as HTMLDialogElement | null)?.showModal();
   }
 }
 
@@ -1334,6 +1399,7 @@ document.addEventListener(
     if (id === 'online-dialog') onlineView = null;
     if (id === 'name-dialog') nameDialogOpen = false;
     if (id === 'report-dialog') reportOpen = false;
+    if (id === 'declare-dialog') declareOpen = false;
     if (id === 'tutorial-dialog' && tutorialStep !== null) {
       tutorialStep = null;
       saveJSON('tusac-tutorial-seen', true);
@@ -1527,6 +1593,24 @@ document.addEventListener('click', (ev) => {
     case 'send-chat':
       sendChatMsg();
       break;
+    case 'open-declare':
+      declareOpen = true;
+      render();
+      break;
+    case 'declare-set': {
+      const opt = declarableSets()[Number(target.dataset.idx)];
+      if (!opt) break;
+      const action: Action = { type: 'declare', player: mySeat, option: opt };
+      if (netMode === 'guest') guest?.send(action);
+      else safeDispatch(action);
+      // Keep the dialog open while more sets remain (state re-render updates it).
+      if (declarableSets().length === 0) {
+        declareOpen = false;
+        (document.getElementById('declare-dialog') as HTMLDialogElement | null)?.close();
+      }
+      render();
+      break;
+    }
     case 'reset-tally':
       if (netMode === 'guest') break;
       if (netMode === 'host') {

@@ -9,7 +9,7 @@ import {
   NUM_PLAYERS,
 } from './engine';
 import { aiChooseAction } from './ai';
-import { DECK_SIZE } from './types';
+import { DECK_SIZE, toCounts } from './types';
 
 describe('newGame', () => {
   it('deals 21 to the dealer and 20 to others, rest to the wall', () => {
@@ -125,6 +125,41 @@ describe('game flow', () => {
       }
     }
     expect(checkedDiscards).toBeGreaterThan(50);
+  });
+
+  it('lets a player set down a face-down set without consuming a turn', () => {
+    for (let seed = 1; seed < 300; seed++) {
+      const g0 = newGame({ seed, dealer: 0 });
+      if (g0.phase.type !== 'discard') continue;
+      const counts = toCounts(g0.players[0].hand);
+      const k = counts.findIndex((c) => c >= 3);
+      if (k < 0) continue;
+      const g = applyAction(g0, {
+        type: 'declare',
+        player: 0,
+        option: { kind: 'triple', fromHand: [k, k, k] },
+      });
+      expect(g.players[0].declared.length).toBe(1);
+      expect(g.players[0].declared[0].cards.length).toBe(3);
+      expect(g.players[0].hand.length).toBe(g0.players[0].hand.length - 3);
+      expect(g.phase).toEqual(g0.phase); // no turn consumed
+      expect(ownedCards(g, 0)).toBe(HAND_SIZE + 1); // dealer, pre-discard
+      expect(totalCards(g)).toBe(DECK_SIZE);
+      // A pair is not declarable; missing cards are rejected.
+      expect(() =>
+        applyAction(g, { type: 'declare', player: 0, option: { kind: 'pair', fromHand: [k, k] } }),
+      ).toThrow();
+      const absent = toCounts(g.players[0].hand).findIndex((c) => c === 0);
+      expect(() =>
+        applyAction(g, {
+          type: 'declare',
+          player: 0,
+          option: { kind: 'triple', fromHand: [absent, absent, absent] },
+        }),
+      ).toThrow();
+      return;
+    }
+    throw new Error('No dealt triple found across seeds — suspicious');
   });
 
   it('rejects illegal actions', () => {

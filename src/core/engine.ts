@@ -40,9 +40,20 @@ export interface ExposedMeld {
   cards: Card[];
 }
 
+/**
+ * A complete set of 3+ cards placed face-down on the owner's field ("úp
+ * khạp"): the owner sees the faces, everyone else only the backs. It scores
+ * its concealed lệnh value when the owner wins.
+ */
+export interface DeclaredMeld {
+  kind: MeldKind;
+  cards: Card[];
+}
+
 export interface PlayerState {
   hand: Card[];
   melds: ExposedMeld[];
+  declared: DeclaredMeld[];
 }
 
 /**
@@ -56,6 +67,7 @@ export type LogEvent =
   | { type: 'draw'; player: number; kind: number } // flipped from the wall
   | { type: 'relay'; player: number; kind: number } // declined a wall card
   | { type: 'eat'; player: number; kind: number; meld: MeldKind }
+  | { type: 'declare'; player: number; size: number } // face-down set (kinds hidden)
   | { type: 'win'; player: number; kind: number; lenh: number }
   | { type: 'wall-empty' };
 
@@ -86,7 +98,13 @@ export interface GameState {
 export type Action =
   | { type: 'discard'; player: number; cardId: number }
   | { type: 'eat'; player: number; option: EatOption }
-  | { type: 'pass'; player: number };
+  | { type: 'pass'; player: number }
+  /**
+   * Place a complete set of 3+ cards from hand face-down on the field.
+   * Valid any time before the game ends, regardless of whose turn it is —
+   * it does not consume a turn or change the phase.
+   */
+  | { type: 'declare'; player: number; option: EatOption };
 
 export function nextPlayer(p: number, count: number = NUM_PLAYERS): number {
   return (p + 1) % count;
@@ -105,7 +123,7 @@ export function newGame(opts: { seed: number; dealer?: number; players?: number 
   let cursor = 0;
   for (let p = 0; p < count; p++) {
     const n = p === dealer ? HAND_SIZE + 1 : HAND_SIZE;
-    players.push({ hand: sortHand(deck.slice(cursor, cursor + n)), melds: [] });
+    players.push({ hand: sortHand(deck.slice(cursor, cursor + n)), melds: [], declared: [] });
     cursor += n;
   }
   const wall = deck.slice(cursor);
@@ -128,7 +146,7 @@ export function newGame(opts: { seed: number; dealer?: number; players?: number 
     state.phase = {
       type: 'finished',
       winner: dealer,
-      score: scoreWin(dealer, [], toCounts(players[dealer].hand), null),
+      score: scoreWin(dealer, [], [], toCounts(players[dealer].hand), null),
       reason: 'dealt-win',
     };
   }
@@ -168,7 +186,58 @@ export function applyAction(prev: GameState, action: Action): GameState {
       return doEat(state, action.player, action.option);
     case 'pass':
       return doPass(state, action.player);
+    case 'declare':
+      return doDeclare(state, action.player, action.option);
   }
+}
+
+/** Shapes that may be set down face-down: complete sets of 3+ cards. */
+function isValidDeclare(kind: MeldKind, kindsIn: number[]): boolean {
+  const kinds = [...kindsIn].sort((a, b) => a - b);
+  const allSame = kinds.every((k) => k === kinds[0]);
+  switch (kind) {
+    case 'triple':
+      return kinds.length === 3 && allSame;
+    case 'quad':
+      return kinds.length === 4 && allSame;
+    case 'tst': {
+      if (kinds.length !== 3) return false;
+      const col = kinds[0] % 4;
+      return kinds[0] === col && kinds[1] === 4 + col && kinds[2] === 8 + col;
+    }
+    case 'xpm': {
+      if (kinds.length !== 3) return false;
+      const col = kinds[0] % 4;
+      return kinds[0] === 12 + col && kinds[1] === 16 + col && kinds[2] === 20 + col;
+    }
+    case 'pawns3':
+    case 'pawns4':
+      return (
+        kinds.length === (kind === 'pawns3' ? 3 : 4) &&
+        kinds.every((k) => k >= 24) &&
+        new Set(kinds.map((k) => k % 4)).size === kinds.length
+      );
+    default:
+      return false;
+  }
+}
+
+function doDeclare(state: GameState, player: number, option: EatOption): GameState {
+  if (state.phase.type === 'finished') throw new Error('Game is over');
+  if (player < 0 || player >= state.players.length) throw new Error('Bad player');
+  if (!isValidDeclare(option.kind, option.fromHand)) throw new Error('Not a declarable set');
+  const hand = state.players[player].hand;
+  // The owner must keep at least one hand card (they must be able to discard).
+  if (hand.length - option.fromHand.length < 1) throw new Error('Cannot empty the hand');
+  const taken: Card[] = [];
+  for (const kind of option.fromHand) {
+    const i = hand.findIndex((c) => kindOf(c) === kind);
+    if (i < 0) throw new Error('Declared cards missing from hand');
+    taken.push(hand.splice(i, 1)[0]);
+  }
+  state.players[player].declared.push({ kind: option.kind, cards: sortHand(taken) });
+  state.log.push({ type: 'declare', player, size: taken.length });
+  return state;
 }
 
 function doDiscard(state: GameState, player: number, cardId: number): GameState {
@@ -258,7 +327,11 @@ function offerCard(state: GameState, card: Card, toPlayer: number, source: Sourc
         kind: m.kind,
         uses: m.cards.map(kindOf),
       }));
-      const score = scoreWin(p, exposed, handCounts, kind);
+      const declared = state.players[p].declared.map((m) => ({
+        kind: m.kind,
+        uses: m.cards.map(kindOf),
+      }));
+      const score = scoreWin(p, exposed, declared, handCounts, kind);
       state.log.push({ type: 'win', player: p, kind, lenh: score.lenh });
       state.phase = { type: 'finished', winner: p, score, reason: 'win' };
       return state;
@@ -276,12 +349,17 @@ export function totalCards(state: GameState): number {
   for (const p of state.players) {
     n += p.hand.length;
     for (const m of p.melds) n += m.cards.length;
+    for (const m of p.declared) n += m.cards.length;
   }
   return n;
 }
 
-/** Cards owned by a player (hand + exposed melds). Always 20 mid-game. */
+/** Cards owned by a player (hand + exposed + declared). Always 20 mid-game. */
 export function ownedCards(state: GameState, player: number): number {
   const p = state.players[player];
-  return p.hand.length + p.melds.reduce((s, m) => s + m.cards.length, 0);
+  return (
+    p.hand.length +
+    p.melds.reduce((s, m) => s + m.cards.length, 0) +
+    p.declared.reduce((s, m) => s + m.cards.length, 0)
+  );
 }

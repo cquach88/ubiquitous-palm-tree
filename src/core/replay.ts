@@ -10,6 +10,7 @@
  * Encoding (space-separated tokens):
  *   d<player>:<cardId>                    discard
  *   e<player>:<meldKind>:<k>.<k>[.<k>]    capture (kind indices from hand)
+ *   s<player>:<meldKind>:<k>.<k>.<k>      set down a face-down set (declare)
  *   p<player>                             pass
  */
 
@@ -24,6 +25,8 @@ export function encodeAction(a: Action): string {
       return `d${a.player}:${a.cardId}`;
     case 'eat':
       return `e${a.player}:${a.option.kind}:${a.option.fromHand.join('.')}`;
+    case 'declare':
+      return `s${a.player}:${a.option.kind}:${a.option.fromHand.join('.')}`;
     case 'pass':
       return `p${a.player}`;
   }
@@ -42,14 +45,14 @@ export function decodeAction(token: string): Action {
     const [player, cardId] = token.slice(1).split(':');
     return { type: 'discard', player: Number(player), cardId: Number(cardId) };
   }
-  if (type === 'e') {
+  if (type === 'e' || type === 's') {
     const [player, kind, fromHand] = token.slice(1).split(':');
     const option: EatOption = {
       kind: kind as MeldKind,
       // Empty fromHand = a capture that consumes no hand cards (lone Tướng).
       fromHand: fromHand ? fromHand.split('.').map(Number) : [],
     };
-    return { type: 'eat', player: Number(player), option };
+    return { type: type === 'e' ? 'eat' : 'declare', player: Number(player), option };
   }
   throw new Error(`Unparseable action token: ${token}`);
 }

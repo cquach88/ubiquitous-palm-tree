@@ -64,7 +64,14 @@ export function redactFor(state: GameState, viewer: number): GameState {
   const dummy = (): Card => ({ id: -1, rank: 'general', color: 'red' });
   const clone = structuredClone(state);
   for (let p = 0; p < clone.players.length; p++) {
-    if (p !== viewer) clone.players[p].hand = clone.players[p].hand.map(dummy);
+    if (p !== viewer) {
+      clone.players[p].hand = clone.players[p].hand.map(dummy);
+      // Face-down declared sets: others see only backs (counts preserved).
+      clone.players[p].declared = clone.players[p].declared.map((m) => ({
+        kind: 'triple',
+        cards: m.cards.map(dummy),
+      }));
+    }
   }
   clone.wall = clone.wall.map(dummy);
   return clone;

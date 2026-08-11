@@ -39,20 +39,27 @@ describe('scoreWin', () => {
     // Hand after claiming: triple of Pháo đỏ where the claimed card completed
     // it → scored as exposed (1), not khạp (6).
     const hand = counts(K('cannon', 'red'), K('cannon', 'red'), K('cannon', 'red'));
-    const score = scoreWin(0, [], hand, K('cannon', 'red'));
+    const score = scoreWin(0, [], [], hand, K('cannon', 'red'));
     expect(score.lenh).toBe(1 + WIN_BONUS);
     // Same hand dealt outright (thiên tới): full khạp value.
-    const dealt = scoreWin(0, [], hand, null);
+    const dealt = scoreWin(0, [], [], hand, null);
     expect(dealt.lenh).toBe(6 + WIN_BONUS);
   });
   it('scores exposed melds at exposed value', () => {
     const score = scoreWin(
       1,
       [{ kind: 'quad', uses: [K('horse', 'white'), K('horse', 'white'), K('horse', 'white'), K('horse', 'white')] }],
+      [],
       counts(K('general', 'red')),
-      K('general', 'red') === -1 ? null : null,
+      null,
     );
-    // exposed quad 6 + lone general 1 + win bonus 3
+    // exposed quad 6 + lone general 1 + win bonus
+    expect(score.lenh).toBe(6 + 1 + WIN_BONUS);
+  });
+  it('scores declared face-down sets at concealed value', () => {
+    const k = K('cannon', 'yellow');
+    const score = scoreWin(2, [], [{ kind: 'triple', uses: [k, k, k] }], counts(K('general', 'red')), null);
+    // declared khạp 6 + lone general 1 + win bonus
     expect(score.lenh).toBe(6 + 1 + WIN_BONUS);
   });
 });

@@ -219,6 +219,18 @@ button.online-active {
   border-radius: 8px;
 }
 
+/* Face-down declared sets ("úp khạp") — locked, concealed value. */
+.meld.declared {
+  align-items: center;
+  background: rgb(0 0 0 / 45%);
+  border: 1px dashed rgb(255 255 255 / 35%);
+}
+
+.meld.declared .lock {
+  font-size: 0.75rem;
+  margin: 0 2px;
+}
+
 /* ---------- cards ---------- */
 .card {
   width: var(--card-w);
