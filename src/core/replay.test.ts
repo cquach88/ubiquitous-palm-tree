@@ -12,6 +12,8 @@ describe('action codec', () => {
       { type: 'pass', player: 3 },
       { type: 'eat', player: 2, option: { kind: 'triple', fromHand: [16, 16] } },
       { type: 'eat', player: 1, option: { kind: 'pawns4', fromHand: [24, 25, 27] } },
+      { type: 'eat', player: 0, option: { kind: 'pair', fromHand: [3] } },
+      { type: 'eat', player: 3, option: { kind: 'loneGeneral', fromHand: [] } },
     ];
     expect(decodeActions(encodeActions(actions))).toEqual(actions);
     expect(decodeActions('')).toEqual([]);
@@ -53,7 +55,12 @@ const reportFile = process.env.REPLAY_REPORT;
 describe.runIf(!!reportFile)('replay bug report', () => {
   it(`replays ${reportFile}`, () => {
     const report = JSON.parse(readFileSync(reportFile!, 'utf8'));
-    const result = replay(Number(report.seed), Number(report.dealer), decodeActions(String(report.actions ?? '')));
+    const result = replay(
+      Number(report.seed),
+      Number(report.dealer),
+      decodeActions(String(report.actions ?? '')),
+      Number(report.players ?? 4),
+    );
     // eslint-disable-next-line no-console
     console.log('[replay-report]', {
       applied: result.applied,

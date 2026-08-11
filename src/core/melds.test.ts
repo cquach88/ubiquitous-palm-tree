@@ -194,4 +194,14 @@ describe('eatOptions', () => {
     // Pairing still requires a card left to discard.
     expect(eatOptions(one, K('horse', 'white'), 1, true)).toEqual([]);
   });
+  it('allows playing a lone Tướng from own wall flip only', () => {
+    const empty = counts();
+    const wall = eatOptions(empty, K('general', 'red'), 10, true);
+    expect(wall).toContainEqual({ kind: 'loneGeneral', fromHand: [] });
+    expect(eatOptions(empty, K('general', 'red'), 10)).toEqual([]);
+    // Not for other ranks.
+    expect(
+      eatOptions(empty, K('advisor', 'red'), 10, true).some((o) => o.kind === 'loneGeneral'),
+    ).toBe(false);
+  });
 });

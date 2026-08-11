@@ -23,6 +23,16 @@ describe('newGame', () => {
       expect(g.phase).toEqual({ type: 'discard', player: 2 });
     }
   });
+
+  it('supports 3-player tables with a bigger wall', () => {
+    const g = newGame({ seed: 9, dealer: 1, players: 3 });
+    expect(g.players.length).toBe(3);
+    expect(g.players.map((p) => p.hand.length)).toEqual([20, 21, 20]);
+    expect(g.wall.length).toBe(DECK_SIZE - (3 * HAND_SIZE + 1));
+    expect(totalCards(g)).toBe(DECK_SIZE);
+    expect(() => newGame({ seed: 1, players: 2 })).toThrow();
+    expect(() => newGame({ seed: 1, players: 5 })).toThrow();
+  });
 });
 
 describe('game flow', () => {

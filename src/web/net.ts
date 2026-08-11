@@ -63,7 +63,7 @@ export function redactFor(state: GameState, viewer: number): GameState {
   if (state.phase.type === 'finished') return state;
   const dummy = (): Card => ({ id: -1, rank: 'general', color: 'red' });
   const clone = structuredClone(state);
-  for (let p = 0; p < NUM_PLAYERS; p++) {
+  for (let p = 0; p < clone.players.length; p++) {
     if (p !== viewer) clone.players[p].hand = clone.players[p].hand.map(dummy);
   }
   clone.wall = clone.wall.map(dummy);
@@ -82,6 +82,8 @@ export interface HostHandlers {
 export class HostNet {
   private peer: Peer;
   private conns: (DataConnection | null)[] = new Array(NUM_PLAYERS).fill(null);
+  /** Highest seat index guests may occupy is seatLimit - 1 (table size). */
+  private seatLimit = NUM_PLAYERS;
   /**
    * Stable per-tab identity of the guest last seen in each seat. A guest who
    * refreshes reconnects with the same token and gets their seat back.
@@ -106,15 +108,16 @@ export class HostNet {
       const msg = data as NetMsg;
       if (msg.t === 'hello') {
         const token = String(msg.token ?? '');
+        const inRange = (i: number) => i > 0 && i < this.seatLimit;
         // Reclaim: same token gets its old seat back (never the host's).
         let seat = token ? this.tokens.indexOf(token) : -1;
-        if (seat === 0) seat = -1;
+        if (!inRange(seat)) seat = -1;
         if (seat < 0) {
-          seat = this.conns.findIndex((c, i) => i > 0 && c === null && this.tokens[i] === null);
+          seat = this.conns.findIndex((c, i) => inRange(i) && c === null && this.tokens[i] === null);
         }
         if (seat < 0) {
           // No untouched seat: reuse one abandoned by a departed guest.
-          seat = this.conns.findIndex((c, i) => i > 0 && c === null);
+          seat = this.conns.findIndex((c, i) => inRange(i) && c === null);
         }
         if (seat < 0) {
           conn.send({ t: 'full' } satisfies NetMsg);
@@ -143,6 +146,11 @@ export class HostNet {
 
   getTokens(): (string | null)[] {
     return this.tokens.slice();
+  }
+
+  /** Restrict which seats guests may take (table size 3 or 4). */
+  setSeatLimit(n: number): void {
+    this.seatLimit = n;
   }
 
   /** Token of the guest currently connected in a seat (null for bots/host). */

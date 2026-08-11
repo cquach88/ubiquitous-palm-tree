@@ -201,7 +201,8 @@ export function winsWith(handCounts: readonly number[], offeredKind: number): bo
  * take someone's discard just to pair it (pairs only complete a hand when
  * winning, which `winsWith` handles). A card you flip from the wall yourself
  * may additionally be captured into a pair with an identical hand card
- * ("chui đôi") — pass `allowPair` for that case.
+ * ("chui đôi"), or — if it is a Tướng — played on its own as a lone general;
+ * pass `allowPair` for those cases.
  */
 export interface EatOption {
   kind: MeldKind;
@@ -220,6 +221,7 @@ export function eatOptions(
   const rank = Math.floor(k / 4);
   const color = k % 4;
 
+  if (allowPair && rank === 0) opts.push({ kind: 'loneGeneral', fromHand: [] });
   if (allowPair && handCounts[k] >= 1) opts.push({ kind: 'pair', fromHand: [k] });
   if (handCounts[k] >= 2) opts.push({ kind: 'triple', fromHand: [k, k] });
   if (handCounts[k] >= 3) opts.push({ kind: 'quad', fromHand: [k, k, k] });

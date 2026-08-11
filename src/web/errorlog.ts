@@ -29,6 +29,8 @@ export interface ReportContext {
   locale: string;
   seed: number;
   dealer: number;
+  /** Seats at the table for this deal (3 or 4). */
+  players: number;
   /** Encoded action history (see src/core/replay.ts). */
   actions: string;
   /** False when the tab restored mid-game and history is partial. */

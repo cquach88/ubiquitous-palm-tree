@@ -64,6 +64,8 @@ let coach: boolean = loadJSON('tusac-coach', false);
 let speed: Speed = loadJSON<Speed>('tusac-speed', 'normal');
 let sortMode: SortMode = loadJSON<SortMode>('tusac-sort', 'rank');
 let myName: string = loadJSON('tusac-name', '');
+/** Seats at the table for games we deal (3 or 4); bots fill empty seats. */
+let tableSize: number = Math.min(4, Math.max(3, loadJSON('tusac-size', 4)));
 let tutorialStep: number | null = null;
 let manualOrder: number[] = [];
 
@@ -272,6 +274,7 @@ function reportContext(): ReportContext {
     locale,
     seed: gameSeed,
     dealer: gameDealer,
+    players: state ? state.players.length : tableSize,
     actions: netMode === 'guest' ? '' : encodeActions(actionHistory),
     historyComplete: netMode !== 'guest' && historyComplete,
     phase: phaseLabelForLog(),
@@ -368,10 +371,11 @@ function startGame(): void {
   settled = false;
   manualOrder = [];
   gameSeed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+  dealer %= tableSize;
   gameDealer = dealer;
   actionHistory = [];
   historyComplete = true;
-  state = newGame({ seed: gameSeed, dealer });
+  state = newGame({ seed: gameSeed, dealer, players: tableSize });
   saveSoloSnapshot();
   render();
   afterAction();
@@ -552,6 +556,7 @@ function startHosting(): void {
   chatLog = [];
   onlineView = 'hostLobby';
   createHostNet(roomCode);
+  host?.setSeatLimit(tableSize);
   saveHostSnapshot();
   render();
 }
@@ -736,6 +741,7 @@ function tryRestoreOnline(): boolean {
   // their tokens and get their seats back.
   for (let s = 1; s < NUM_PLAYERS; s++) mpNames[s] = null;
   createHostNet(roomCode, snap.tokens);
+  host?.setSeatLimit(tableSize);
   render();
   if (mpStarted) afterAction();
   return true;
@@ -925,7 +931,7 @@ function centerHTML(): string {
       </div>
     </div>
     <div class="log" id="log">${state.log
-      .slice(-60)
+      .slice(-4)
       .map((e) => `<div>${t().logLine(e, N)}</div>`)
       .join('')}</div>
     ${netMode !== 'solo' ? chatHTML() : ''}
@@ -1026,7 +1032,7 @@ function humanSeatHTML(): string {
 function tallyHTML(winner: number | null): string {
   const s = t();
   const N = displayNames();
-  const rows = Array.from({ length: NUM_PLAYERS }, (_, p) => p)
+  const rows = Array.from({ length: state.players.length }, (_, p) => p)
     .sort((a, b) => chips[b] - chips[a])
     .map(
       (p) =>
@@ -1101,7 +1107,9 @@ function onlineDialogHTML(): string {
   } else {
     // hostLobby / guestLobby
     const N = displayNames();
-    const list = Array.from({ length: NUM_PLAYERS }, (_, seat) => {
+    const lobbySeats =
+      netMode === 'host' ? tableSize : mpStarted ? state.players.length : NUM_PLAYERS;
+    const list = Array.from({ length: lobbySeats }, (_, seat) => {
       const filled = seat === 0 || mpNames[seat];
       const label = seat === mySeat ? `${N[seat]} ★` : filled ? N[seat] : s.emptySeat;
       const pts = ` <span class="lobby-pts">${chips[seat]} ${locale === 'vi' ? 'điểm' : 'pts'}</span>`;
@@ -1123,7 +1131,8 @@ function onlineDialogHTML(): string {
         : '';
     const resetBtn =
       onlineView === 'hostLobby'
-        ? `<button data-action="reset-tally">${s.resetTally}</button>`
+        ? `<button data-action="reset-tally">${s.resetTally}</button>
+           <button data-action="toggle-size">${s.sizeLabel(tableSize)}</button>`
         : '';
     body = `${err}
       ${codeBlock}
@@ -1218,9 +1227,10 @@ function reportDialogHTML(): string {
 function render(): void {
   const app = document.getElementById('app')!;
   const s = t();
-  const left = (mySeat + 1) % NUM_PLAYERS;
-  const top = (mySeat + 2) % NUM_PLAYERS;
-  const right = (mySeat + 3) % NUM_PLAYERS;
+  const count = state.players.length;
+  const left = (mySeat + 1) % count;
+  const top = count === 4 ? (mySeat + 2) % count : -1;
+  const right = (mySeat + (count === 4 ? 3 : 2)) % count;
   const onlineLabel = netMode === 'solo' ? s.online : s.onlineBadge(roomCode);
   app.innerHTML = `
     <header>
@@ -1228,6 +1238,7 @@ function render(): void {
       <span class="sub">${s.sub}</span>
       <div class="controls">
         <button data-action="toggle-lang">${s.langToggle}</button>
+        ${netMode === 'guest' ? '' : `<button data-action="toggle-size" title="${s.sizeTitle}">${s.sizeLabel(tableSize)}</button>`}
         ${netMode === 'guest' ? '' : `<button data-action="toggle-speed">${s.speedLabel[speed]}</button>`}
         <button data-action="toggle-coach">${coach ? s.hintsOn : s.hintsOff}</button>
         <button data-action="tutorial">${s.tutorial}</button>
@@ -1237,7 +1248,7 @@ function render(): void {
       </div>
     </header>
     <main class="table">
-      ${opponentSeatHTML(top, 'top')}
+      ${top >= 0 ? opponentSeatHTML(top, 'top') : ''}
       ${opponentSeatHTML(left, 'left')}
       ${centerHTML()}
       ${opponentSeatHTML(right, 'right')}
@@ -1565,6 +1576,26 @@ document.addEventListener('click', (ev) => {
       saveJSON('tusac-coach', coach);
       render();
       break;
+    case 'toggle-size': {
+      if (netMode === 'guest') break;
+      const next = tableSize === 4 ? 3 : 4;
+      if (netMode === 'host' && next === 3 && mpNames[3]) {
+        netError = t().seatOccupied;
+        onlineView = 'hostLobby';
+        render();
+        break;
+      }
+      tableSize = next;
+      saveJSON('tusac-size', tableSize);
+      if (netMode === 'host') {
+        host?.setSeatLimit(tableSize);
+        broadcastLobby();
+        render(); // current round keeps its size; the next deal uses the new one
+      } else {
+        startGame();
+      }
+      break;
+    }
     case 'edit-name':
       nameDraft = myName;
       nameDialogOpen = true;

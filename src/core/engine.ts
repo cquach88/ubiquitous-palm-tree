@@ -28,7 +28,9 @@ import { eatOptions, fullyDecomposes, winsWith } from './melds';
 import type { ScoreResult } from './scoring';
 import { scoreWin } from './scoring';
 
+/** Maximum seats at the table; games may be played with 3 or 4. */
 export const NUM_PLAYERS = 4;
+export const MIN_PLAYERS = 3;
 export const HAND_SIZE = 20; // dealer gets 21
 
 export type Source = 'discard' | 'wall';
@@ -86,18 +88,22 @@ export type Action =
   | { type: 'eat'; player: number; option: EatOption }
   | { type: 'pass'; player: number };
 
-export function nextPlayer(p: number): number {
-  return (p + 1) % NUM_PLAYERS;
+export function nextPlayer(p: number, count: number = NUM_PLAYERS): number {
+  return (p + 1) % count;
 }
 
-export function newGame(opts: { seed: number; dealer?: number }): GameState {
-  const dealer = opts.dealer ?? 0;
+export function newGame(opts: { seed: number; dealer?: number; players?: number }): GameState {
+  const count = opts.players ?? NUM_PLAYERS;
+  if (count < MIN_PLAYERS || count > NUM_PLAYERS) {
+    throw new Error(`players must be between ${MIN_PLAYERS} and ${NUM_PLAYERS}`);
+  }
+  const dealer = (opts.dealer ?? 0) % count;
   const rng = mulberry32(opts.seed);
   const deck = shuffle(buildDeck(), rng);
 
   const players: PlayerState[] = [];
   let cursor = 0;
-  for (let p = 0; p < NUM_PLAYERS; p++) {
+  for (let p = 0; p < count; p++) {
     const n = p === dealer ? HAND_SIZE + 1 : HAND_SIZE;
     players.push({ hand: sortHand(deck.slice(cursor, cursor + n)), melds: [] });
     cursor += n;
@@ -174,7 +180,7 @@ function doDiscard(state: GameState, player: number, cardId: number): GameState 
   if (idx < 0) throw new Error('Card not in hand');
   const [card] = hand.splice(idx, 1);
   state.log.push({ type: 'discard', player, kind: kindOf(card) });
-  return offerCard(state, card, nextPlayer(player), 'discard');
+  return offerCard(state, card, nextPlayer(player, state.players.length), 'discard');
 }
 
 function doEat(state: GameState, player: number, option: EatOption): GameState {
@@ -230,7 +236,7 @@ function doPass(state: GameState, player: number): GameState {
 
   // Passing a wall card relays it to the next player as a normal offer.
   state.log.push({ type: 'relay', player, kind: kindOf(offered) });
-  return offerCard(state, offered, nextPlayer(player), 'discard');
+  return offerCard(state, offered, nextPlayer(player, state.players.length), 'discard');
 }
 
 /**
@@ -239,8 +245,9 @@ function doPass(state: GameState, player: number): GameState {
  */
 function offerCard(state: GameState, card: Card, toPlayer: number, source: Source): GameState {
   const kind = kindOf(card);
-  for (let i = 0; i < NUM_PLAYERS; i++) {
-    const p = (toPlayer + i) % NUM_PLAYERS;
+  const count = state.players.length;
+  for (let i = 0; i < count; i++) {
+    const p = (toPlayer + i) % count;
     const handCounts = toCounts(state.players[p].hand);
     if (winsWith(handCounts, kind)) {
       handCounts[kind]++;

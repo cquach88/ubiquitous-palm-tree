@@ -47,4 +47,25 @@ describe('simulated games', () => {
     expect(wins + draws).toBe(200);
     expect(wins).toBeGreaterThan(50);
   }, 120_000);
+
+  it('plays 60 seeded 3-player games with invariants intact', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      let g = newGame({ seed, dealer: seed % 3, players: 3 });
+      let steps = 0;
+      while (g.phase.type !== 'finished') {
+        expect(totalCards(g)).toBe(DECK_SIZE);
+        if (g.phase.type === 'respond') {
+          expect(g.phase.player).toBeLessThan(3);
+          expect(ownedCards(g, g.phase.player)).toBe(HAND_SIZE);
+        }
+        g = applyAction(g, aiChooseAction(g));
+        steps++;
+        expect(steps).toBeLessThan(8000);
+      }
+      expect(totalCards(g)).toBe(DECK_SIZE);
+      if (g.phase.winner !== null) {
+        expect(fullyDecomposes(toCounts(g.players[g.phase.winner].hand))).toBe(true);
+      }
+    }
+  }, 120_000);
 });

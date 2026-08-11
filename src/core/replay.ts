@@ -46,7 +46,8 @@ export function decodeAction(token: string): Action {
     const [player, kind, fromHand] = token.slice(1).split(':');
     const option: EatOption = {
       kind: kind as MeldKind,
-      fromHand: fromHand.split('.').map(Number),
+      // Empty fromHand = a capture that consumes no hand cards (lone Tướng).
+      fromHand: fromHand ? fromHand.split('.').map(Number) : [],
     };
     return { type: 'eat', player: Number(player), option };
   }
@@ -84,8 +85,13 @@ function phaseLabel(state: GameState): string {
  * failure is captured in the result so tooling can print exactly where the
  * engine rejected an action.
  */
-export function replay(seed: number, dealer: number, actions: readonly Action[]): ReplayResult {
-  let state = newGame({ seed, dealer });
+export function replay(
+  seed: number,
+  dealer: number,
+  actions: readonly Action[],
+  players = 4,
+): ReplayResult {
+  let state = newGame({ seed, dealer, players });
   let applied = 0;
   for (const action of actions) {
     try {

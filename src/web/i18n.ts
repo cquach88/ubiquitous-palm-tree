@@ -126,6 +126,9 @@ const en = {
   reconnecting: 'Connection lost — reconnecting…',
 
   resetTally: 'Reset tally',
+  sizeLabel: (n: number) => `👥 ${n}`,
+  sizeTitle: 'Players at the table (3 or 4) — bots fill empty seats',
+  seatOccupied: 'Seat 4 has a player — kick them before shrinking the table.',
   kick: 'Kick',
   kickedMsg: 'The host removed you from the game.',
   chatEmpty: 'Say hi to the table!',
@@ -297,6 +300,9 @@ const vi: typeof en = {
   reconnecting: 'Mất kết nối — đang kết nối lại…',
 
   resetTally: 'Xóa bảng điểm',
+  sizeLabel: (n) => `👥 ${n}`,
+  sizeTitle: 'Số người chơi (3 hoặc 4) — ghế trống do máy chơi',
+  seatOccupied: 'Ghế 4 đang có người — hãy mời ra trước khi bớt ghế.',
   kick: 'Mời ra',
   kickedMsg: 'Chủ phòng đã mời bạn ra khỏi phòng.',
   chatEmpty: 'Chào cả bàn đi!',
