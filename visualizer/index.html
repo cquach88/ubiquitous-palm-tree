@@ -131,6 +131,18 @@ button[hidden], .filebtn[hidden] { display: none; }
 .check { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .check input[type=range] { width: 110px; }
+/* song transport: play/pause, stop, and a position bar */
+.transport { display: flex; align-items: center; gap: 8px; }
+.transport[hidden] { display: none; }
+.transport button { flex: 0 0 auto; min-width: 72px; }
+.transport .time { flex: 0 0 auto; min-width: 40px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; text-align: center; }
+#seek { flex: 1 1 auto; min-width: 60px; height: 44px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+/* phones: the bar gets a full-width line of its own, so it is easy to drag with a thumb */
+@media (max-width: 560px) {
+  .transport { flex-wrap: wrap; row-gap: 0; }
+  .transport button { flex: 1 1 0; }
+  #seek { order: 10; flex: 1 1 100%; }
+}
 #meter { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; }
 #meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
 #fail {
@@ -159,7 +171,13 @@ button[hidden], .filebtn[hidden] { display: none; }
         <input id="fileInput" type="file" accept="audio/*">
       </label>
       <button id="demoBtn" type="button">Demo track</button>
-      <button id="pauseBtn" type="button" hidden>Pause</button>
+    </div>
+    <div class="transport" id="transport" hidden>
+      <button id="playBtn" type="button" aria-label="Pause">Pause</button>
+      <button id="stopBtn" type="button">Stop</button>
+      <span class="time" id="tCur">0:00</span>
+      <input id="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Position in the song">
+      <span class="time" id="tDur">0:00</span>
     </div>
     <div id="meter" aria-hidden="true"><i></i></div>
     <div class="row small">
@@ -1136,7 +1154,7 @@ void main() {
     $('tabBtn').textContent = mode === 'tab' ? 'Stop capture' : 'Capture computer audio';
     $('demoBtn').classList.toggle('on', mode === 'demo');
     $('demoBtn').textContent = mode === 'demo' ? 'Stop demo' : 'Demo track';
-    $('pauseBtn').hidden = mode !== 'file';
+    $('transport').hidden = mode !== 'file';
     $('micBtn').classList.toggle('primary', mode === 'idle');
   }
 
@@ -1316,6 +1334,15 @@ void main() {
         setStatus('That file would not play. Try an MP3, M4A or WAV file.');
         mode = 'idle'; refreshButtons();
       });
+      // the play button always shows what pressing it will do
+      var syncPlay = function () {
+        var playing = !audioEl.paused;
+        $('playBtn').textContent = playing ? 'Pause' : 'Play';
+        $('playBtn').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+      };
+      audioEl.addEventListener('play', syncPlay);
+      audioEl.addEventListener('pause', syncPlay);
+      audioEl.addEventListener('loadedmetadata', function () { updateTransport(true); });
     }
     if (objUrl) URL.revokeObjectURL(objUrl);
     objUrl = URL.createObjectURL(f);
@@ -1325,11 +1352,9 @@ void main() {
     refreshButtons();
     var name = f.name || 'your song';
     audioEl.play().then(function () {
-      $('pauseBtn').textContent = 'Pause';
       setStatus('Playing ' + name);
       requestWake();
     }).catch(function () {
-      $('pauseBtn').textContent = 'Play';
       setStatus('Loaded ' + name + '. Press Play to start.');
     });
   }
@@ -1640,14 +1665,60 @@ void main() {
   });
   $('fileLabel').addEventListener('click', function () { ensureCtx(); });
   $('fileInput').addEventListener('change', function () { loadFile(this.files && this.files[0]); this.value = ''; });
-  $('pauseBtn').addEventListener('click', function () {
-    if (!audioEl) return;
+  /* ---------- Song transport ---------- */
+  function fmtTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    sec = Math.floor(sec);
+    var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, ss = sec % 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (ss < 10 ? '0' : '') + ss;
+  }
+  var seeking = false;
+  function updateTransport(force) {
+    if (!audioEl || mode !== 'file') return;
+    var d = audioEl.duration;
+    if (force || !seeking) {
+      $('tDur').textContent = fmtTime(d);
+      if (!seeking) {
+        $('seek').value = d > 0 ? Math.round(audioEl.currentTime / d * 1000) : 0;
+        $('tCur').textContent = fmtTime(audioEl.currentTime);
+      }
+    }
+  }
+  function togglePlay() {
+    if (!audioEl || mode !== 'file') return;
     ensureCtx();
     if (audioEl.paused) {
-      audioEl.play().then(function () { $('pauseBtn').textContent = 'Pause'; setStatus('Playing'); requestWake(); })
+      audioEl.play().then(function () { setStatus('Playing'); requestWake(); })
         .catch(function () { setStatus('Playback was blocked. Press Play again.'); });
-    } else { audioEl.pause(); $('pauseBtn').textContent = 'Play'; setStatus('Paused'); }
+    } else { audioEl.pause(); setStatus('Paused'); }
+  }
+  function jumpTo(sec) {
+    if (!audioEl) return;
+    audioEl.currentTime = Math.max(0, Math.min(sec, (audioEl.duration || 0) - 0.05));
+    resetLevels();                                   // the beat grid starts over from here
+    updateTransport(true);
+  }
+  $('playBtn').addEventListener('click', togglePlay);
+  $('stopBtn').addEventListener('click', function () {
+    if (!audioEl) return;
+    audioEl.pause();
+    jumpTo(0);
+    setStatus('Stopped. Press Play to start from the beginning.');
   });
+  // dragging the bar moves through the song as you drag; the music follows
+  $('seek').addEventListener('input', function () {
+    if (!audioEl || !(audioEl.duration > 0)) return;
+    seeking = true;
+    var sec = this.value / 1000 * audioEl.duration;
+    $('tCur').textContent = fmtTime(sec);
+    audioEl.currentTime = sec;
+  });
+  $('seek').addEventListener('change', function () {
+    seeking = false;
+    if (audioEl && audioEl.duration > 0) jumpTo(this.value / 1000 * audioEl.duration);
+  });
+  setInterval(updateTransport, 250);
+;
   function setLogo(m) {
     logoMode = m;
     try { localStorage.setItem('mirrorsea.logo', m); } catch (e) {}
@@ -1718,6 +1789,13 @@ void main() {
     resize();
   });
   window.addEventListener('keydown', function (e) {
+    var tg = e.target && e.target.tagName;
+    var typing = tg === 'INPUT' && e.target.type !== 'range';
+    if (mode === 'file' && ((e.key === ' ' && tg !== 'BUTTON') || e.key === 'Home') && !typing) {
+      e.preventDefault();
+      if (e.key === ' ') togglePlay(); else jumpTo(0);
+      return;
+    }
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON')) return;
     if (e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') setScene(sceneIx + 1, false);
     else if (e.key === 'ArrowLeft') setScene(sceneIx - 1, false);
