@@ -437,10 +437,13 @@ float sdPillars(vec3 p) {
   if (uB.x < 0.01) return 1e5;
   float ax = abs(p.x) - PX;
   if (abs(ax) > 1.6) return abs(ax) - 0.6;
-  float d = 1e5;
+  // only this pillar and the neighbor on the near side can be closest; the far neighbor
+  // is at least its z separation away, which bounds the step so nothing is skipped
   float ci = floor(p.z / PS);
-  for (int k = -1; k <= 1; k++) {
-    float cz = (ci + float(k) + 0.5) * PS;
+  float side = fract(p.z / PS) < 0.5 ? -1.0 : 1.0;
+  float d = abs(p.z - (ci - side + 0.5) * PS) - 0.5;
+  for (int k = 0; k < 2; k++) {
+    float cz = (ci + side * float(k) + 0.5) * PS;
     float h = 0.25 + pillarLevel(cz) * uB.x;
     vec3 b = abs(vec3(ax, p.y - h * 0.5, p.z - cz)) - vec3(0.5, h * 0.5, 0.5);
     d = min(d, length(max(b, 0.0)) + min(max(b.x, max(b.y, b.z)), 0.0));
@@ -521,10 +524,11 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
   float u = clamp((cz - uCamZ) / PRANGE, 0.0, 1.0);
   float lv = pillarLevel(cz);
   float h = 0.25 + lv * uB.x;
-  vec2 e = vec2(0.01, 0.0);
-  vec3 n = normalize(vec3(sdPillars(p + e.xyy) - sdPillars(p - e.xyy),
-                          sdPillars(p + e.yxy) - sdPillars(p - e.yxy),
-                          sdPillars(p + e.yyx) - sdPillars(p - e.yyx)));
+  // a box's normal is the axis of the face we are on: no extra distance samples needed
+  vec3 lq = vec3(abs(p.x) - PX, p.y - h * 0.5, p.z - cz) / vec3(0.5, h * 0.5, 0.5);
+  vec3 aq = abs(lq);
+  vec3 n = aq.x > aq.y && aq.x > aq.z ? vec3(sign(lq.x) * sign(p.x), 0.0, 0.0)
+         : aq.y > aq.z ? vec3(0.0, sign(lq.y), 0.0) : vec3(0.0, 0.0, sign(lq.z));
   vec3 r = reflect(rd, n);
   float fr = 0.08 + 0.92 * pow(1.0 - max(dot(-rd, n), 0.0), 4.0);
   vec3 env = r.y > 0.0 ? skyBase(r) : mix(uWater, hazeCol(r), 0.5);
@@ -583,7 +587,8 @@ vec3 render(vec3 ro, vec3 rd) {
     float m2;
     vec3 o2 = pw + vec3(0.0, 0.03, 0.0);
     float tmax2 = min(FAR, (HB - 0.03) / rr.y);
-    float t2 = march(o2, rr, tmax2, 40, m2);
+    // distant water is mostly fog: fewer reflection steps there
+    float t2 = march(o2, rr, tmax2, int(mix(40.0, 20.0, smoothstep(12.0, 60.0, tw))), m2);
     if (m2 > 0.5 && t2 <= tmax2) refl = fogged(shade(o2 + rr * t2, rr, m2, tw + t2), rr, t2);
     else refl = sky(rr);
   } else {
@@ -640,6 +645,31 @@ void main() {
   }
   col += (hash2(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) / 255.0;
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}
+</script>
+
+<script id="postFrag" type="x-shader/x-fragment">
+// Upscale the rendered frame to the screen with contrast-adaptive sharpening (after AMD's
+// FidelityFX CAS): a 5-tap sharpen that holds back where the image already has contrast,
+// so edges get crisp without halos. With uAmt = 0 it is a plain copy.
+precision mediump float;
+uniform sampler2D uImg;
+uniform vec2 uSrc, uDst;
+uniform float uAmt;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uDst;
+  vec2 px = 1.0 / uSrc;
+  vec3 c = texture2D(uImg, uv).rgb;
+  vec3 n = texture2D(uImg, uv + vec2(0.0, px.y)).rgb;
+  vec3 s = texture2D(uImg, uv - vec2(0.0, px.y)).rgb;
+  vec3 e = texture2D(uImg, uv + vec2(px.x, 0.0)).rgb;
+  vec3 w = texture2D(uImg, uv - vec2(px.x, 0.0)).rgb;
+  vec3 mn = min(c, min(min(n, s), min(e, w)));
+  vec3 mx = max(c, max(max(n, s), max(e, w)));
+  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+  vec3 wgt = -amp * mix(0.0, 0.2, uAmt);
+  vec3 o = (c + (n + s + e + w) * wgt) / (1.0 + 4.0 * wgt);
+  gl_FragColor = vec4(clamp(o, 0.0, 1.0), 1.0);
 }
 </script>
 
@@ -743,6 +773,38 @@ void main() {
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   var loc = gl.getAttribLocation(prog, 'p');
+
+  /* ---------- Upscaler ----------
+     The scene is drawn into an offscreen image at the resolution the device can afford,
+     then scaled up to the full screen with sharpening, instead of the browser's blurry
+     stretch. If offscreen drawing is unavailable it falls back to drawing direct. */
+  var post = null, PU = {}, fbo = null, fboTex = null, rw = 0, rh = 0, useFbo = false;
+  try {
+    post = gl.createProgram();
+    gl.attachShader(post, compile(gl.VERTEX_SHADER, 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }'));
+    gl.attachShader(post, compile(gl.FRAGMENT_SHADER, $('postFrag').textContent));
+    gl.bindAttribLocation(post, loc, 'p');
+    gl.linkProgram(post);
+    if (!gl.getProgramParameter(post, gl.LINK_STATUS)) throw new Error('post link failed');
+    ['uImg', 'uSrc', 'uDst', 'uAmt'].forEach(function (n) { PU[n] = gl.getUniformLocation(post, n); });
+    fbo = gl.createFramebuffer(); fboTex = gl.createTexture();
+    useFbo = true;
+  } catch (e) { useFbo = false; }
+  function sizeFbo(w, h) {
+    if (!useFbo || (w === rw && h === rh)) return;
+    rw = w; rh = h;
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, fboTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) useFbo = false;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 
@@ -911,9 +973,13 @@ void main() {
     var budget = quality === 'fast' ? STEPS[4] : STEPS[step];
     var scale = Math.min(dpr, Math.sqrt(budget / (w * h)));
     atNative = scale >= dpr - 1e-3;
-    var cw = Math.max(48, Math.round(w * scale)), ch = Math.max(48, Math.round(h * scale));
+    var sw = Math.max(48, Math.round(w * scale)), sh = Math.max(48, Math.round(h * scale));
+    // the screen image is full resolution (up to about 4K); the scene is drawn at sw x sh
+    var ds = useFbo ? Math.min(dpr, Math.sqrt(8.3e6 / (w * h))) : scale;
+    var cw = Math.max(48, Math.round(w * ds)), ch = Math.max(48, Math.round(h * ds));
     if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
-    gl.viewport(0, 0, cw, ch);
+    if (useFbo) sizeFbo(Math.min(sw, cw), Math.min(sh, ch));
+    if (!useFbo) { rw = cw; rh = ch; }
   }
   var lastSize = '';
   window.addEventListener('resize', function () {
@@ -1410,10 +1476,13 @@ void main() {
     var target = P[40] * motion * (1 + 1.0 * energy + (calm ? 0 : 0.35 * beatEnv));
     vel += (target - vel) * Math.min(1, dt * 2.5);
     camZ += vel * dt;
-    var aspect = canvas.width / canvas.height;
+    if (useFbo) gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, rw, rh);
+    gl.useProgram(prog);
+    var aspect = rw / rh;
     var focal = (aspect < 1 ? 1.05 : 1.45) * (1 - (calm ? 0 : 0.03 * beatEnv));
 
-    gl.uniform2f(U.uRes, canvas.width, canvas.height);
+    gl.uniform2f(U.uRes, rw, rh);
     gl.uniform1f(U.uTime, time);
     gl.uniform1f(U.uCamZ, camZ);
     gl.uniform1f(U.uFocal, focal);
@@ -1453,6 +1522,19 @@ void main() {
     gl.activeTexture(gl.TEXTURE1);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, waveTex);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (useFbo) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(post);
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.uniform1i(PU.uImg, 6);
+      gl.uniform2f(PU.uSrc, rw, rh);
+      gl.uniform2f(PU.uDst, canvas.width, canvas.height);
+      var up = canvas.width / rw;                     // how much the image is being enlarged
+      gl.uniform1f(PU.uAmt, up > 1.05 ? Math.min(1, 0.35 + (up - 1) * 0.8) : 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
 
     if (++meterTick % 4 === 0) meterBar.style.width = Math.round(Math.min(1, level * 1.6) * 100) + '%';
   }
@@ -1498,11 +1580,11 @@ void main() {
   function infoText() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var sw = Math.round(stage.clientWidth * dpr), sh = Math.round(stage.clientHeight * dpr);
-    var pct = Math.round(100 * canvas.width * canvas.height / Math.max(1, sw * sh));
+    var pct = Math.round(100 * rw * rh / Math.max(1, sw * sh));
     var adv = gpuAdvice();
     return 'Graphics: ' + gpuName + '\n' +
       'Frame rate: ' + (perf.fps ? Math.round(perf.fps) + ' fps' : 'measuring...') + '\n' +
-      'Drawing ' + canvas.width + ' x ' + canvas.height + ' of ' + sw + ' x ' + sh + ' (' + pct + '% of the pixels)\n' +
+      'Drawing ' + rw + ' x ' + rh + ' of ' + sw + ' x ' + sh + ' (' + pct + '% of the pixels)' + (useFbo && rw < canvas.width ? ', sharpened up to full size' : '') + '\n' +
       QLABEL[quality] + (adv ? '\n\n' + adv : '');
   }
   var infoOn = false;
@@ -1572,7 +1654,7 @@ void main() {
   }
 
   window.__viz = { setScene: setScene, freeze: function (v) { frozen = v; }, count: SCENES.length, spec: function () { return Array.from(specTex); },
-    stats: function () { return { gpu: gpuName, sw: softwareGpu, fps: perf.fps, w: canvas.width, h: canvas.height, step: step, ceiling: ceiling, dt: sdt, mode: mode, beatT: lastBeat, bpm: Math.round(60 / bt.P * 10) / 10, conf: Math.round(bt.conf * 100) / 100, locked: bt.locked, at: audioEl ? audioEl.currentTime : 0 }; } };
+    stats: function () { return { gpu: gpuName, sw: softwareGpu, fps: perf.fps, w: rw, h: rh, cw: canvas.width, ch: canvas.height, fbo: useFbo, step: step, ceiling: ceiling, dt: sdt, mode: mode, beatT: lastBeat, bpm: Math.round(60 / bt.P * 10) / 10, conf: Math.round(bt.conf * 100) / 100, locked: bt.locked, at: audioEl ? audioEl.currentTime : 0 }; } };
 })();
 </script>
 </body>
