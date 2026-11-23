@@ -1,7 +1,7 @@
 // Offline support for the installed app. Pages are fetched fresh when online
 // (so updates show up right away) and served from cache when offline.
-const CACHE = 'mirrorsea-v5';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-180.png', './logo.png'];
+const CACHE = 'mirrorsea-v6';
+const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-180.png', './logo.png', './head.jpg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));
