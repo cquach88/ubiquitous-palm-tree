@@ -183,6 +183,10 @@ uniform vec4 uC;                // fog density, ribbon amount, stars, flash
 uniform sampler2D uLogo, uLogoGlow; // emblem: crisp pixel mask, and a soft blurred copy for the glow
 uniform vec4 uLogoA;            // mode (0 off, 1 sky, 2 front), glitch, color split (cells), brightness
 uniform vec4 uLogoB;            // texture size in texels (w, h), front scale (texels per screen unit), sky scale (texels per radian)
+uniform sampler2D uLogoSdf;     // signed distance to the emblem's outline, for the glass look
+uniform sampler2D uHead;        // the glass head artwork (black = empty)
+uniform vec4 uGlass;            // style (0 pixel, 1 glass), tube width (texels), dispersion, edge-line brightness
+uniform vec4 uD;                // glass spheres, glass pillars, prism ribbon, glass head backdrop (per scene)
 
 const float FAR = 150.0;
 const float SL = 28.0;
@@ -226,6 +230,19 @@ float terr(vec2 p) {
   return h * m + (m - 1.0);
 }
 
+// Iridescent palette from the glass artwork: violet, blue, cyan, ice white, gold, amber.
+vec3 prism(float h) {
+  h = fract(h) * 7.0;
+  float f = fract(h);
+  if (h < 1.0) return mix(vec3(0.25, 0.1, 0.9), vec3(0.1, 0.3, 1.0), f);
+  if (h < 2.0) return mix(vec3(0.1, 0.3, 1.0), vec3(0.1, 0.8, 1.0), f);
+  if (h < 3.0) return mix(vec3(0.1, 0.8, 1.0), vec3(0.85, 0.95, 1.0), f);
+  if (h < 4.0) return mix(vec3(0.85, 0.95, 1.0), vec3(1.0, 0.9, 0.2), f);
+  if (h < 5.0) return mix(vec3(1.0, 0.9, 0.2), vec3(1.0, 0.55, 0.1), f);
+  if (h < 6.0) return mix(vec3(1.0, 0.55, 0.1), vec3(0.6, 0.2, 0.9), f);
+  return mix(vec3(0.6, 0.2, 0.9), vec3(0.25, 0.1, 0.9), f);
+}
+
 // The emblem lives in texel space of logo.png (padded so the glow has room).
 float logoMask(vec2 c) {
   if (c.x < 0.0 || c.y < 0.0 || c.x >= uLogoB.x || c.y >= uLogoB.y) return 0.0;
@@ -251,6 +268,51 @@ vec4 logoAt(vec2 c) {
   return vec4(core * uLogoA.w, a) + vec4(mix(vec3(1.0), uAur * 2.0, 0.5) * glow * 0.35 * uLogoA.w, 0.0);
 }
 
+float sdfAt(vec2 c) { return texture2D(uLogoSdf, c / uLogoB.xy).r * 40.0 - 10.0; }
+// spectral streaks seen through the glass at offset q (one call per color channel = dispersion)
+vec3 streak(vec2 c, vec2 q) {
+  float s = noise(q) * 0.65 + noise(q * 2.3 + 5.0) * 0.35;
+  return prism(c.x * 0.003 + c.y * 0.004 + s * 0.9 + uTime * 0.03) * (0.25 + 1.2 * smoothstep(0.35, 0.75, s));
+}
+// Hollow glass: a clear tube running just inside the outline, with thin bright edge lines,
+// spectral streaks bent through it, and a fresnel sheen. Mostly see-through.
+vec4 glassAt(vec2 c, out vec2 bend) {
+  bend = vec2(0.0);
+  float W = uGlass.y;
+  float d = sdfAt(c);
+  if (d < -1.5 || d > W + 1.5) return vec4(0.0);
+  float e = 0.8;
+  vec2 g = vec2(sdfAt(c + vec2(e, 0.0)) - sdfAt(c - vec2(e, 0.0)),
+                sdfAt(c + vec2(0.0, e)) - sdfAt(c - vec2(0.0, e)));
+  g /= max(length(g), 1e-4);                          // points into the shape
+  float u = clamp((d - 0.5 * W) / (0.5 * W), -1.0, 1.0);
+  float body = smoothstep(-0.3, 0.3, d) * (1.0 - smoothstep(W - 0.3, W + 0.3, d));
+  vec2 n2 = g * u;                                    // tube normal leans out at both edges
+  float nz = sqrt(max(0.0, 1.0 - u * u));
+  float F = 0.04 + 0.96 * pow(1.0 - nz, 3.0);
+  float t = uTime * 0.06;
+  vec2 q0 = c * 0.022 + vec2(t, -t * 0.7);
+  float k = 1.4 * uGlass.z;
+  vec3 ir = vec3(streak(c, q0 + n2 * k).r, streak(c, q0 + n2 * k * 1.12).g, streak(c, q0 + n2 * k * 1.25).b);
+  float line = exp(-d * d / 0.30) + exp(-(d - W) * (d - W) / 0.30);
+  vec3 n3 = vec3(n2, nz);
+  float sp = pow(max(dot(n3, normalize(vec3(-0.35, 0.55, 1.4))), 0.0), 40.0);
+  // sheen whose color follows the tube's angle, like the violet-to-gold fill of the glass render
+  vec3 sheen = prism(atan(n2.y, n2.x) * 0.159 + uTime * 0.04 + 0.55) * F;
+  vec3 col = (ir * (0.35 + 1.1 * F) * 1.5 + sheen * 0.9) * body + vec3(0.9, 0.95, 1.0) * (line * uGlass.w + sp * 1.2 * body);
+  bend = n2 * body;
+  return vec4(col, body * (0.10 + 0.5 * F));
+}
+// The emblem in the chosen style, with the beat glitch applied.
+vec4 emblem(vec2 c, out vec2 bend) {
+  bend = vec2(0.0);
+  if (uGlass.x < 0.5) return logoAt(c);
+  float slot = floor(uTime * 14.0);
+  float band = floor(c.y / 8.0);
+  c.x += 2.0 * floor(uLogoA.y * step(0.62, hash2(vec2(band, slot))) * (hash2(vec2(slot, band + 7.0)) - 0.5) * 17.0 + 0.5);
+  return glassAt(c, bend);
+}
+
 vec3 hazeCol(vec3 rd) {
   vec2 a = normalize(rd.xz + vec2(1e-5));
   vec2 b = normalize(uSun.xz);
@@ -258,7 +320,9 @@ vec3 hazeCol(vec3 rd) {
   return uSkyHor + uSunCol * pow(sd, 10.0) * 0.35;
 }
 
-vec3 sky(vec3 rd) {
+// Sky without the emblem or the glass head: used for reflections on spheres and pillars,
+// which keeps the shader small (sky() is inlined at every call site).
+vec3 skyBase(vec3 rd) {
   float y = max(rd.y, 0.0);
   vec3 c = mix(uSkyHor, uSkyTop, 1.0 - exp(-y * 3.2));
   float sd = max(dot(rd, uSun), 0.0);
@@ -284,23 +348,49 @@ vec3 sky(vec3 rd) {
 
   c += uSunCol * (smoothstep(0.9993, 0.9997, sd) * 4.0 + pow(sd, 180.0) * 1.2) * (1.0 - cl * 0.7);
 
-  if (uLogoA.x > 0.5 && uLogoA.x < 1.5) {
-    float laz = atan(rd.x, rd.z);
-    float lel = asin(clamp(rd.y, -1.0, 1.0));
-    vec2 lc = vec2(laz, lel - 0.34) * uLogoB.w + uLogoB.xy * 0.5;
-    vec4 L = logoAt(lc);
-    // a dark halo behind the emblem keeps it readable on bright skies
-    float halo = clamp(texture2D(uLogoGlow, lc / uLogoB.xy).r * 1.8, 0.0, 1.0);
-    c = c * (1.0 - 0.6 * max(halo, L.w)) + L.rgb * 2.4;
-  }
-
   float az = atan(rd.x, rd.z);
   float u = clamp(az / 2.4 + 0.5, 0.0, 1.0);
   float w = texture2D(uWave, vec2(u, 0.5)).r * 2.0 - 1.0;
   float cy = 0.36 + 0.04 * sin(az * 3.0 + uTime * 0.3) + w * 0.2;
   float dy = rd.y - cy;
   float g = exp(-abs(dy) * 60.0) * 1.7 + step(0.0, dy) * exp(-dy * 7.0) * 0.28;
-  c += uAur * g * uC.y * (0.4 + 0.9 * uAudio.z + 0.6 * uAudio.w) * (1.0 - cl * 0.5);
+  vec3 rib = mix(uAur, prism(u * 1.3 + uTime * 0.05) * 1.3, uD.z);
+  c += rib * g * uC.y * (0.4 + 0.9 * uAudio.z + 0.6 * uAudio.w) * (1.0 - cl * 0.5);
+
+  return c;
+}
+
+// Full sky: what you see directly and in the water.
+vec3 sky(vec3 rd) {
+  vec3 c = skyBase(rd);
+  if (uLogoA.x > 0.5 && uLogoA.x < 1.5) {
+    float laz = atan(rd.x, rd.z);
+    float lel = asin(clamp(rd.y, -1.0, 1.0));
+    vec2 lc = vec2(laz, lel - 0.34) * uLogoB.w + uLogoB.xy * 0.5;
+    if (lc.x > 0.0 && lc.y > 0.0 && lc.x < uLogoB.x && lc.y < uLogoB.y) {
+    vec2 bd;
+    vec4 L = emblem(lc, bd) * (1.0 - uD.w);          // the glass head brings its own C
+    if (uGlass.x < 0.5) {
+      // a dark halo behind the pixel emblem keeps it readable on bright skies
+      float halo = clamp(texture2D(uLogoGlow, lc / uLogoB.xy).r * 1.8, 0.0, 1.0) * (1.0 - uD.w);
+      c = c * (1.0 - 0.6 * max(halo, L.w)) + L.rgb * 2.4;
+    } else {
+      c = c * (1.0 - L.w) + L.rgb * 2.0;
+    }
+    }
+  }
+
+
+  // the glass head, standing over the valley; kicks split its color channels apart
+  if (uD.w > 0.01) {
+    float az = atan(rd.x, rd.z), hel = asin(clamp(rd.y, -1.0, 1.0));
+    vec2 hu = vec2(az / 0.68 + 0.5, 1.0 - (hel + 0.04) / 0.68);
+    if (hu.x > 0.0 && hu.x < 1.0 && hu.y > 0.0 && hu.y < 1.0) {
+      float sh = 0.002 + 0.012 * uAudio.w;
+      vec3 hc = vec3(texture2D(uHead, hu + vec2(sh, 0.0)).r, texture2D(uHead, hu).g, texture2D(uHead, hu - vec2(sh, 0.0)).b);
+      c += hc * hc * uD.w * (1.1 + 1.2 * uAudio.w);
+    }
+  }
   return c;
 }
 
@@ -400,10 +490,20 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
     vec3 n = normalize(p - s.xyz);
     vec3 r = reflect(rd, n);
     vec3 env;
-    if (r.y >= 0.0) env = sky(r);
-    else env = mix(uWater, sky(vec3(r.x, -r.y, r.z)), 0.55) * 0.85;
-    float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-    return env * uSphTint + uAur * rim * (0.15 + 0.9 * uAudio.w);
+    if (r.y >= 0.0) env = skyBase(r);
+    else env = mix(uWater, skyBase(vec3(r.x, -r.y, r.z)), 0.55) * 0.85;
+    float ndv = max(dot(n, -rd), 0.0);
+    float rim = pow(1.0 - ndv, 3.0);
+    vec3 chrome = env * uSphTint + uAur * rim * (0.15 + 0.9 * uAudio.w);
+    if (uD.x < 0.01) return chrome;
+    // glass bubble: see-through, a thin bright outline, iridescent sheen toward the edge
+    vec3 tr = refract(rd, n, 0.7);
+    vec3 through = tr.y > 0.0 ? skyBase(tr) : mix(uWater, hazeCol(tr), 0.5);
+    float Fg = 0.04 + 0.96 * pow(1.0 - ndv, 4.0);
+    vec3 irid = prism(dot(n, vec3(0.3, 0.8, 0.2)) * 0.8 + uTime * 0.05 + s.z * 0.013) * smoothstep(0.45, 1.0, 1.0 - ndv);
+    float rimLine = exp(-pow((ndv - 0.07) / 0.045, 2.0));
+    vec3 glass = through * 0.8 + env * Fg + irid * (0.7 + 1.6 * uAudio.w) + vec3(rimLine) * 1.3;
+    return mix(chrome, glass, uD.x);
   }
   float cz = (floor(p.z / PS) + 0.5) * PS;
   float u = clamp((cz - uCamZ) / PRANGE, 0.0, 1.0);
@@ -415,7 +515,7 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
                           sdPillars(p + e.yyx) - sdPillars(p - e.yyx)));
   vec3 r = reflect(rd, n);
   float fr = 0.08 + 0.92 * pow(1.0 - max(dot(-rd, n), 0.0), 4.0);
-  vec3 env = r.y > 0.0 ? sky(r) : mix(uWater, hazeCol(r), 0.5);
+  vec3 env = r.y > 0.0 ? skyBase(r) : mix(uWater, hazeCol(r), 0.5);
   vec3 col = uPilCol * (uSunCol * max(dot(n, uSun), 0.0) + amb * 0.6);
   col = mix(col, env, fr * 0.8);
   vec3 hue = mix(uAur, uSunCol, u);
@@ -425,6 +525,20 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
     float band = smoothstep(0.40, 0.48, abs(fract(p.y * 1.2) - 0.5));
     float top = smoothstep(h - 0.6, h, p.y);
     col += hue * (band * 0.5 + top * 1.3) * (0.12 + 1.6 * lv);
+  }
+  if (uD.y > 0.01) {
+    // glass block: clear body, bright iridescent edges, level glow along the top
+    vec3 q = vec3(abs(p.x) - PX, p.y - h * 0.5, p.z - cz);
+    vec3 ed = vec3(0.5, h * 0.5, 0.5) - abs(q);
+    float a1 = min(ed.x, min(ed.y, ed.z)), a3 = max(ed.x, max(ed.y, ed.z));
+    float a2 = ed.x + ed.y + ed.z - a1 - a3;          // distance to the nearest edge
+    float edgeL = exp(-a2 * a2 / 0.0018);
+    vec3 tr = refract(rd, n, 0.72);
+    vec3 through = mix(hazeCol(tr), uSkyTop, clamp(tr.y * 2.0, 0.0, 1.0)) * 0.22;
+    vec3 pc = prism(u * 0.9 + p.y * 0.06 + uTime * 0.05);
+    float topG = smoothstep(h - 0.5, h, p.y);
+    vec3 glass = through * 0.7 + env * fr * 0.25 + pc * edgeL * (0.7 + 2.8 * lv) + pc * topG * (0.1 + 1.4 * lv) * 0.5;
+    col = mix(col, glass, uD.y);
   }
   return col;
 }
@@ -486,6 +600,13 @@ void main() {
   up = cross(fw, rt);
   vec3 rd = normalize(uv.x * rt + uv.y * up + uFocal * fw);
 
+  vec4 FL = vec4(0.0);
+  if (uLogoA.x > 1.5) {
+    vec2 fbend;
+    FL = emblem(uv * uLogoB.z + uLogoB.xy * 0.5, fbend);
+    // the scene behind the glass is bent by the tube's curvature
+    rd = normalize(rd + (rt * fbend.x + up * fbend.y) * 0.09 * (1.0 + uAudio.w));
+  }
   vec3 col = render(ro, rd);
   col += uAur * 0.05 * uAudio.w * uC.w;
 
@@ -496,10 +617,14 @@ void main() {
   vec2 sc = gl_FragCoord.xy / uRes;
   col *= 0.72 + 0.28 * pow(16.0 * sc.x * sc.y * (1.0 - sc.x) * (1.0 - sc.y), 0.18);
   if (uLogoA.x > 1.5) {
-    vec2 fc = uv * uLogoB.z + uLogoB.xy * 0.5;
-    vec4 L = logoAt(fc);
-    col *= 0.5;                                   // dim the scene so the emblem reads
-    col = max(col * (1.0 - L.w), min(L.rgb, vec3(1.0))) + L.rgb * 0.15 * (1.0 - L.w);
+    if (uGlass.x < 0.5) {
+      col *= 0.5;                                 // dim the scene so the emblem reads
+      col = max(col * (1.0 - FL.w), min(FL.rgb, vec3(1.0))) + FL.rgb * 0.15 * (1.0 - FL.w);
+    } else {
+      col *= 0.62;
+      col *= 1.0 - FL.w;                          // a faint tint inside the glass
+      col = 1.0 - (1.0 - col) * (1.0 - min(FL.rgb, vec3(1.0)));   // light adds like a screen blend
+    }
   }
   col += (hash2(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) / 255.0;
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
@@ -541,17 +666,22 @@ void main() {
       skyTop: [0.34, 0.45, 0.62], skyHor: [1.0, 0.90, 0.70], sunCol: [1.0, 0.85, 0.60], sunAz: 0.05, sunEl: 0.08,
       terA: [0.25, 0.25, 0.22], terB: [0.50, 0.48, 0.42], water: [0.35, 0.38, 0.40],
       pilCol: [0.12, 0.12, 0.13], sphTint: [1.0, 1.0, 1.0], aur: [0.5, 0.72, 1.0],
-      A: [7.0, 0.0, 0.2, 0.25], B: [2.5, 1.5, 0.0, 0.40], C: [0.017, 1.0, 0.0], speed: 1.9 },
+      A: [7.0, 0.0, 0.2, 0.25], B: [2.5, 1.5, 0.0, 0.40], C: [0.017, 1.0, 0.0], speed: 1.9, D: [1, 0, 0, 0] },
     { name: 'Emerald Midnight',
       skyTop: [0.0, 0.02, 0.08], skyHor: [0.02, 0.24, 0.30], sunCol: [0.70, 0.90, 1.0], sunAz: -0.28, sunEl: 0.32,
       terA: [0.02, 0.12, 0.10], terB: [0.08, 0.10, 0.16], water: [0.0, 0.05, 0.08],
       pilCol: [0.0, 0.03, 0.03], sphTint: [0.85, 1.0, 0.95], aur: [0.2, 1.0, 0.42],
-      A: [10.0, 0.0, 0.55, 0.40], B: [6.0, 1.0, 0.0, 0.20], C: [0.008, 1.7, 1.0], speed: 2.8 }
+      A: [10.0, 0.0, 0.55, 0.40], B: [6.0, 1.0, 0.0, 0.20], C: [0.008, 1.7, 1.0], speed: 2.8, D: [0, 1, 0, 0] },
+    { name: 'Prism Void',
+      skyTop: [0.0, 0.0, 0.03], skyHor: [0.07, 0.05, 0.13], sunCol: [0.7, 0.72, 0.9], sunAz: 0.25, sunEl: 0.04,
+      terA: [0.03, 0.03, 0.05], terB: [0.07, 0.07, 0.10], water: [0.0, 0.0, 0.015],
+      pilCol: [0.02, 0.02, 0.03], sphTint: [1.0, 1.0, 1.0], aur: [0.6, 0.5, 1.0],
+      A: [7.0, 0.0, 0.0, 0.0], B: [5.0, 1.2, 0.0, 0.06], C: [0.012, 1.0, 0.35], speed: 2.4, D: [1, 1, 1, 1] }
   ];
   function lin(c) { return c.map(function (v) { return Math.pow(v, 2.2); }); }
   function flat(s) {
     return [].concat(lin(s.skyTop), lin(s.skyHor), lin(s.sunCol), [s.sunAz, s.sunEl], lin(s.terA), lin(s.terB), lin(s.water),
-      lin(s.pilCol), lin(s.sphTint), lin(s.aur), s.A, s.B, s.C, [s.speed]);
+      lin(s.pilCol), lin(s.sphTint), lin(s.aur), s.A, s.B, s.C, [s.speed], s.D || [0, 0, 0, 0]);
   }
   var sceneIx = 0, P = flat(SCENES[0]), Pfrom = P.slice(), Pto = P.slice(), blend = 1, sceneClock = 0;
   function setScene(i, instant) {
@@ -594,7 +724,7 @@ void main() {
 
   var U = {};
   ['uRes', 'uTime', 'uCamZ', 'uFocal', 'uCam', 'uLook', 'uAudio', 'uSpec', 'uWave', 'uSkyTop', 'uSkyHor', 'uSunCol', 'uSun',
-   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC', 'uLogo', 'uLogoGlow', 'uLogoA', 'uLogoB'].forEach(function (n) {
+   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC', 'uLogo', 'uLogoGlow', 'uLogoA', 'uLogoB', 'uLogoSdf', 'uHead', 'uGlass', 'uD'].forEach(function (n) {
     U[n] = gl.getUniformLocation(prog, n);
   });
 
@@ -662,14 +792,81 @@ void main() {
       }
       logoTex(2, LW, LH, px, gl.NEAREST);
       logoTex(3, LW, LH, out, gl.LINEAR);
+      buildSdf(px);
       logoReady = true;
     };
     img.src = 'logo.png';
   })();
-  gl.uniform1i(U.uLogo, 2); gl.uniform1i(U.uLogoGlow, 3);
-  var LOGO_MODES = ['sky', 'front', 'off'], LOGO_LABEL = { sky: 'Logo: Sky', front: 'Logo: Front', off: 'Logo: Off' };
-  var logoMode = 'sky', glitch = 0;
-  try { var lm = localStorage.getItem('mirrorsea.logo'); if (LOGO_MODES.indexOf(lm) >= 0) logoMode = lm; } catch (e) {}
+  // Signed distance to the emblem's outline (positive inside), at 3x the mask's resolution,
+  // with corners softened slightly like the glass render. Stored as (d + 10) / 40 in texels.
+  function buildSdf(px) {
+    var K = 3, W = LW * K, H = LH * K, x, y, i, k;
+    var m = new Float32Array(W * H);
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) m[y * W + x] = px[((y / K) | 0) * LW + ((x / K) | 0)] ? 1 : 0;
+    var R = 6, sg = 2.4, ker = [], ks = 0, tmp = new Float32Array(W * H);
+    for (k = -R; k <= R; k++) { var v0 = Math.exp(-k * k / (2 * sg * sg)); ker.push(v0); ks += v0; }
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
+      var a = 0; for (k = -R; k <= R; k++) { var xx = x + k; if (xx >= 0 && xx < W) a += m[y * W + xx] * ker[k + R]; } tmp[y * W + x] = a / ks;
+    }
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
+      var b = 0; for (k = -R; k <= R; k++) { var yy = y + k; if (yy >= 0 && yy < H) b += tmp[yy * W + x] * ker[k + R]; } m[y * W + x] = b / ks > 0.5 ? 1 : 0;
+    }
+    var INF = 1e20, fin = new Float32Array(W * H), fout = new Float32Array(W * H);
+    for (i = 0; i < W * H; i++) { fin[i] = m[i] ? INF : 0; fout[i] = m[i] ? 0 : INF; }
+    edt2(fin, W, H); edt2(fout, W, H);
+    var out = new Uint8Array(W * H);
+    for (i = 0; i < W * H; i++) {
+      var dd = m[i] ? Math.sqrt(fin[i]) - 0.5 : -(Math.sqrt(fout[i]) - 0.5);
+      out[i] = Math.max(0, Math.min(255, Math.round((dd / K + 10) / 40 * 255)));
+    }
+    logoTex(4, W, H, out, gl.LINEAR);
+  }
+  // exact squared Euclidean distance transform (Felzenszwalb and Huttenlocher), in place
+  function edt1(f, n, d, v, z) {
+    var k = 0, q, s; v[0] = 0; z[0] = -1e20; z[1] = 1e20;
+    for (q = 1; q < n; q++) {
+      s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; z[k] = s; z[k + 1] = 1e20;
+    }
+    k = 0;
+    for (q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+  }
+  function edt2(g, W, H) {
+    var n = Math.max(W, H), f = new Float32Array(n), d = new Float32Array(n), v = new Int32Array(n), z = new Float32Array(n + 1), x, y;
+    for (x = 0; x < W; x++) { for (y = 0; y < H; y++) f[y] = g[y * W + x]; edt1(f, H, d, v, z); for (y = 0; y < H; y++) g[y * W + x] = d[y]; }
+    for (y = 0; y < H; y++) { for (x = 0; x < W; x++) f[x] = g[y * W + x]; edt1(f, W, d, v, z); for (x = 0; x < W; x++) g[y * W + x] = d[x]; }
+  }
+  gl.uniform1i(U.uLogo, 2); gl.uniform1i(U.uLogoGlow, 3); gl.uniform1i(U.uLogoSdf, 4); gl.uniform1i(U.uHead, 5);
+  logoTex(4, 1, 1, new Uint8Array([0]), gl.LINEAR);
+  (function () {                                      // glass head backdrop
+    var tx = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, tx);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(3));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    var img = new Image();
+    img.onload = function () {
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, tx);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.generateMipmap(gl.TEXTURE_2D);
+    };
+    img.src = 'head.jpg';
+  })();
+  var LOGO_MODES = ['glass-sky', 'glass-front', 'pixel-sky', 'pixel-front', 'off'];
+  var LOGO_LABEL = { 'glass-sky': 'Logo: Glass sky', 'glass-front': 'Logo: Glass front',
+                     'pixel-sky': 'Logo: Pixel sky', 'pixel-front': 'Logo: Pixel front', off: 'Logo: Off' };
+  var logoMode = 'glass-sky', glitch = 0;
+  try {
+    var lm = localStorage.getItem('mirrorsea.logo');
+    if (lm === 'sky' || lm === 'front') lm = 'glass-' + lm;          // settings saved by the earlier version
+    if (LOGO_MODES.indexOf(lm) >= 0) logoMode = lm;
+  } catch (e) {}
 
   /* ---------- Render resolution ----------
      Quality steps are pixel budgets. In Auto, the page probes upward one step at a
@@ -1204,7 +1401,10 @@ void main() {
     // emblem: hits widen the color split and briefly slice the rows sideways
     if (beatHit && !calm) glitch = Math.max(glitch, 0.35 + 0.65 * beat);
     glitch *= Math.exp(-dt * 7);
-    var lmode = !logoReady ? 0 : logoMode === 'sky' ? 1 : logoMode === 'front' ? 2 : 0;
+    var lmode = !logoReady ? 0 : /sky$/.test(logoMode) ? 1 : /front$/.test(logoMode) ? 2 : 0;
+    var glassStyle = /^glass/.test(logoMode) ? 1 : 0;
+    gl.uniform4f(U.uGlass, glassStyle, 6 + (calm ? 0 : 1.2 * beatEnv), 1 + (calm ? 0 : 1.6 * beatEnv), 0.85 + (calm ? 0 : 1.1 * beatEnv));
+    gl.uniform4f(U.uD, P[41], P[42], P[43], P[44]);
     // front: emblem 72% of screen height, narrowed on tall phones so it never clips
     var frontScale = logoInnerH / Math.min(1.44, 2 * aspect * 0.86 * logoInnerH / logoInnerW);
     var split = 2 + (calm ? 0 : 6 * beatEnv);   // texels; the artwork's own split is one art pixel (2 texels)
