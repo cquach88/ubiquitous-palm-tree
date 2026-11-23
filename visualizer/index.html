@@ -154,6 +154,7 @@ button[hidden], .filebtn[hidden] { display: none; }
     <div id="meter" aria-hidden="true"><i></i></div>
     <div class="row small">
       <button id="nextBtn" type="button">Next scene</button>
+      <button id="logoBtn" type="button">Logo: Sky</button>
       <button id="qualBtn" type="button">Quality: Auto</button>
       <button id="fullBtn" type="button">Full screen</button>
     </div>
@@ -179,6 +180,9 @@ uniform vec3 uSkyTop, uSkyHor, uSunCol, uSun, uTerA, uTerB, uWater, uPilCol, uSp
 uniform vec4 uA;                // terrain height, terrace, snow, cloud
 uniform vec4 uB;                // pillar gain, sphere size, checker, ripple
 uniform vec4 uC;                // fog density, ribbon amount, stars, flash
+uniform sampler2D uLogo, uLogoGlow; // emblem: crisp pixel mask, and a soft blurred copy for the glow
+uniform vec4 uLogoA;            // mode (0 off, 1 sky, 2 front), glitch, color split (cells), brightness
+uniform vec4 uLogoB;            // texture size in texels (w, h), front scale (texels per screen unit), sky scale (texels per radian)
 
 const float FAR = 150.0;
 const float SL = 28.0;
@@ -222,6 +226,29 @@ float terr(vec2 p) {
   return h * m + (m - 1.0);
 }
 
+// The emblem lives in texel space of logo.png (padded so the glow has room).
+float logoMask(vec2 c) {
+  if (c.x < 0.0 || c.y < 0.0 || c.x >= uLogoB.x || c.y >= uLogoB.y) return 0.0;
+  return texture2D(uLogo, (floor(c) + 0.5) / uLogoB.xy).r;
+}
+// Returns the emblem's color at cell position c (alpha in w): white core with a red and
+// cyan split like the artwork, slice glitches on hits, faint scanlines, and a soft glow.
+vec4 logoAt(vec2 c) {
+  float slot = floor(uTime * 14.0);
+  float band = floor(c.y / 9.0);
+  float g = hash2(vec2(band, slot));
+  c.x += uLogoA.y * step(0.62, g) * (hash2(vec2(slot, band + 7.0)) - 0.5) * 34.0;
+  float s = uLogoA.z;
+  float w = logoMask(c);
+  float r = logoMask(c + vec2(s, 0.15 * s));
+  float b = logoMask(c - vec2(s, 0.15 * s));
+  vec3 core = vec3(max(w, r), max(w, b), max(w, b));
+  float scan = 0.86 + 0.14 * smoothstep(0.15, 0.5, abs(fract(c.y / 3.0) - 0.5));
+  float a = max(w, max(r, b));
+  float glow = texture2D(uLogoGlow, c / uLogoB.xy).r;
+  return vec4(core * scan * uLogoA.w, a) + vec4(mix(vec3(1.0), uAur * 2.0, 0.5) * glow * 0.35 * uLogoA.w, 0.0);
+}
+
 vec3 hazeCol(vec3 rd) {
   vec2 a = normalize(rd.xz + vec2(1e-5));
   vec2 b = normalize(uSun.xz);
@@ -254,6 +281,16 @@ vec3 sky(vec3 rd) {
   }
 
   c += uSunCol * (smoothstep(0.9993, 0.9997, sd) * 4.0 + pow(sd, 180.0) * 1.2) * (1.0 - cl * 0.7);
+
+  if (uLogoA.x > 0.5 && uLogoA.x < 1.5) {
+    float laz = atan(rd.x, rd.z);
+    float lel = asin(clamp(rd.y, -1.0, 1.0));
+    vec2 lc = vec2(laz, lel - 0.34) * uLogoB.w + uLogoB.xy * 0.5;
+    vec4 L = logoAt(lc);
+    // a dark halo behind the emblem keeps it readable on bright skies
+    float halo = clamp(texture2D(uLogoGlow, lc / uLogoB.xy).r * 1.8, 0.0, 1.0);
+    c = c * (1.0 - 0.6 * max(halo, L.w)) + L.rgb * 2.4;
+  }
 
   float az = atan(rd.x, rd.z);
   float u = clamp(az / 2.4 + 0.5, 0.0, 1.0);
@@ -456,6 +493,12 @@ void main() {
   col = mix(vec3(lum), col, 1.15);
   vec2 sc = gl_FragCoord.xy / uRes;
   col *= 0.72 + 0.28 * pow(16.0 * sc.x * sc.y * (1.0 - sc.x) * (1.0 - sc.y), 0.18);
+  if (uLogoA.x > 1.5) {
+    vec2 fc = uv * uLogoB.z + uLogoB.xy * 0.5;
+    vec4 L = logoAt(fc);
+    col *= 0.5;                                   // dim the scene so the emblem reads
+    col = max(col * (1.0 - L.w), min(L.rgb, vec3(1.0))) + L.rgb * 0.15 * (1.0 - L.w);
+  }
   col += (hash2(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) / 255.0;
   gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
@@ -549,7 +592,7 @@ void main() {
 
   var U = {};
   ['uRes', 'uTime', 'uCamZ', 'uFocal', 'uCam', 'uLook', 'uAudio', 'uSpec', 'uWave', 'uSkyTop', 'uSkyHor', 'uSunCol', 'uSun',
-   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC'].forEach(function (n) {
+   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC', 'uLogo', 'uLogoGlow', 'uLogoA', 'uLogoB'].forEach(function (n) {
     U[n] = gl.getUniformLocation(prog, n);
   });
 
@@ -569,6 +612,62 @@ void main() {
   for (var wi = 0; wi < 256; wi++) waveF[wi] = 128;
   makeTex(0, 64); makeTex(1, 256);
   gl.uniform1i(U.uSpec, 0); gl.uniform1i(U.uWave, 1);
+
+  /* ---------- Emblem ----------
+     logo.png is a black and white mask of the artwork (white = lit). The red and cyan
+     split is drawn live, so it can widen on the beat. Replace logo.png with any other
+     black and white image to change the emblem. */
+  var LPAD = 40, LW = 1, LH = 1, logoInnerW = 1, logoInnerH = 1, logoReady = false;
+  function logoTex(unit, w, h, data, filter) {
+    var tx = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, tx);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+  }
+  logoTex(2, 1, 1, new Uint8Array(1), gl.NEAREST);
+  logoTex(3, 1, 1, new Uint8Array(1), gl.LINEAR);
+  (function () {
+    var img = new Image();
+    img.onload = function () {
+      var w = img.naturalWidth, h = img.naturalHeight;
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var c2 = cv.getContext('2d'); c2.drawImage(img, 0, 0);
+      var src = c2.getImageData(0, 0, w, h).data;
+      LW = w + 2 * LPAD; LH = h + 2 * LPAD; logoInnerW = w; logoInnerH = h;
+      var px = new Uint8Array(LW * LH), x, y, k;
+      for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+        var o = (y * w + x) * 4;
+        var lit = (src[o] + src[o + 1] + src[o + 2]) / 3 * (src[o + 3] / 255) > 127;
+        if (lit) px[(LH - 1 - LPAD - y) * LW + x + LPAD] = 255;   // texture rows run bottom to top
+      }
+      // soft glow: separable gaussian blur of the mask
+      var R = 22, sg = 9, ker = [], ks = 0;
+      for (k = -R; k <= R; k++) { var v = Math.exp(-k * k / (2 * sg * sg)); ker.push(v); ks += v; }
+      var t1 = new Float32Array(LW * LH), out = new Uint8Array(LW * LH);
+      for (y = 0; y < LH; y++) for (x = 0; x < LW; x++) {
+        var acc = 0;
+        for (k = -R; k <= R; k++) { var xx = x + k; if (xx >= 0 && xx < LW) acc += px[y * LW + xx] * ker[k + R]; }
+        t1[y * LW + x] = acc / ks;
+      }
+      for (y = 0; y < LH; y++) for (x = 0; x < LW; x++) {
+        var acc2 = 0;
+        for (k = -R; k <= R; k++) { var yy = y + k; if (yy >= 0 && yy < LH) acc2 += t1[yy * LW + x] * ker[k + R]; }
+        out[y * LW + x] = Math.min(255, Math.round(acc2 / ks * 1.6));
+      }
+      logoTex(2, LW, LH, px, gl.NEAREST);
+      logoTex(3, LW, LH, out, gl.LINEAR);
+      logoReady = true;
+    };
+    img.src = 'logo.png';
+  })();
+  gl.uniform1i(U.uLogo, 2); gl.uniform1i(U.uLogoGlow, 3);
+  var LOGO_MODES = ['sky', 'front', 'off'], LOGO_LABEL = { sky: 'Logo: Sky', front: 'Logo: Front', off: 'Logo: Off' };
+  var logoMode = 'sky', glitch = 0;
+  try { var lm = localStorage.getItem('mirrorsea.logo'); if (LOGO_MODES.indexOf(lm) >= 0) logoMode = lm; } catch (e) {}
 
   /* ---------- Render resolution ----------
      Quality steps are pixel budgets. In Auto, the page probes upward one step at a
@@ -1100,6 +1199,16 @@ void main() {
     gl.uniform4f(U.uA, P[29], P[30], P[31], P[32]);
     gl.uniform4f(U.uB, P[33], P[34], P[35], P[36]);
     gl.uniform4f(U.uC, P[37], P[38], P[39], calm ? 0 : 1);
+    // emblem: hits widen the color split and briefly slice the rows sideways
+    if (beatHit && !calm) glitch = Math.max(glitch, 0.35 + 0.65 * beat);
+    glitch *= Math.exp(-dt * 7);
+    var lmode = !logoReady ? 0 : logoMode === 'sky' ? 1 : logoMode === 'front' ? 2 : 0;
+    // front: emblem 72% of screen height, narrowed on tall phones so it never clips
+    var frontScale = logoInnerH / Math.min(1.44, 2 * aspect * 0.86 * logoInnerH / logoInnerW);
+    var split = (2.2 + (calm ? 0 : 6 * beatEnv)) * logoInnerH / 350;   // the artwork's own split is about 2 texels
+    gl.uniform4f(U.uLogoA, lmode, calm ? 0 : glitch, split * (lmode === 1 ? 2.6 : 1), 0.85 + 0.5 * beatEnv);
+    // sky: the emblem spans 0.42 radians (about 24 degrees) of the view, centered 0.34 above the horizon
+    gl.uniform4f(U.uLogoB, LW, LH, frontScale * (1 - (calm ? 0 : 0.035 * beatEnv)), logoInnerH / 0.42);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, specTex);
@@ -1130,6 +1239,15 @@ void main() {
       audioEl.play().then(function () { $('pauseBtn').textContent = 'Pause'; setStatus('Playing'); requestWake(); })
         .catch(function () { setStatus('Playback was blocked. Press Play again.'); });
     } else { audioEl.pause(); $('pauseBtn').textContent = 'Play'; setStatus('Paused'); }
+  });
+  function setLogo(m) {
+    logoMode = m;
+    try { localStorage.setItem('mirrorsea.logo', m); } catch (e) {}
+    $('logoBtn').textContent = LOGO_LABEL[m];
+  }
+  setLogo(logoMode);
+  $('logoBtn').addEventListener('click', function () {
+    setLogo(LOGO_MODES[(LOGO_MODES.indexOf(logoMode) + 1) % LOGO_MODES.length]);
   });
   function showQuality() { $('qualBtn').textContent = QLABEL[quality]; }
   showQuality();
@@ -1168,10 +1286,13 @@ void main() {
     if (e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') setScene(sceneIx + 1, false);
     else if (e.key === 'ArrowLeft') setScene(sceneIx - 1, false);
     else if (e.key === 'f' || e.key === 'F') toggleFull();
+    else if (e.key === 'l' || e.key === 'L') setLogo(LOGO_MODES[(LOGO_MODES.indexOf(logoMode) + 1) % LOGO_MODES.length]);
+    else if (e.key === 'h' || e.key === 'H') { clearTimeout(quietTimer); quietTimer = null; document.body.classList.toggle('quiet'); }
   });
 
   var quietTimer = null;
-  function wake() {
+  function wake(e) {
+    if (e && e.type === 'keydown' && (e.key === 'h' || e.key === 'H')) return;   // H hides the controls
     document.body.classList.remove('quiet');
     clearTimeout(quietTimer);
     quietTimer = setTimeout(function () { quietTimer = null; if (live()) document.body.classList.add('quiet'); }, 5000);
