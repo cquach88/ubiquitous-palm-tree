@@ -44,6 +44,16 @@ body {
 
 .plate, .strip { transition: opacity 0.6s ease; }
 body.quiet .plate, body.quiet .strip { opacity: 0; pointer-events: none; }
+body.quiet .strip { -webkit-backdrop-filter: none; backdrop-filter: none; }
+#info {
+  position: absolute; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
+  max-width: min(420px, calc(100% - 32px)); padding: 10px 12px; border-radius: 10px;
+  background: rgba(5, 7, 13, 0.82); border: 1px solid var(--line);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink);
+  white-space: pre-wrap; overflow-wrap: anywhere; display: none; z-index: 2;
+}
+#info.on { display: block; }
+#gpuWarn { color: #ffd27a; }
 body.quiet { cursor: none; }
 
 .plate {
@@ -157,6 +167,7 @@ button[hidden], .filebtn[hidden] { display: none; }
       <button id="logoBtn" type="button">Logo: Sky</button>
       <button id="qualBtn" type="button">Quality: Auto</button>
       <button id="fullBtn" type="button">Full screen</button>
+      <button id="infoBtn" type="button">Info</button>
     </div>
     <div class="meta">
       <span id="status" role="status" aria-live="polite">Pick a music source. The mic works on any phone or computer.</span>
@@ -165,6 +176,7 @@ button[hidden], .filebtn[hidden] { display: none; }
     </div>
   </div>
 
+  <div id="info" aria-live="off"></div>
   <div id="fail"><p id="failText"></p></div>
 </div>
 
@@ -696,6 +708,18 @@ void main() {
            canvas.getContext('experimental-webgl');
   if (!gl) { fail('This browser could not start WebGL, which the visualizer needs. Try a current version of Safari, Chrome or Firefox.'); return; }
 
+  /* ---------- Which graphics chip is drawing this? ----------
+     A browser with hardware acceleration off, or one that Windows runs on the low-power
+     GPU, draws everything on the processor: 10 to 50 times slower, whatever the PC. */
+  var gpuName = 'unknown', softwareGpu = false;
+  try {
+    var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    gpuName = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    var probe = document.createElement('canvas').getContext('webgl', { failIfMajorPerformanceCaveat: true });
+    softwareGpu = !probe || /swiftshader|llvmpipe|software|basic render/i.test(gpuName);
+  } catch (e) {}
+  var lowPowerGpu = /intel|uhd graphics|iris|radeon\(tm\) graphics|vega \d+ graphics/i.test(gpuName) && !/arc/i.test(gpuName);
+
   function compile(type, src) {
     var s = gl.createShader(type);
     gl.shaderSource(s, src); gl.compileShader(s);
@@ -869,31 +893,38 @@ void main() {
   } catch (e) {}
 
   /* ---------- Render resolution ----------
-     Quality steps are pixel budgets. In Auto, the page probes upward one step at a
-     time while frames keep pace with the display (capped at 60 fps as the target, so a
-     120 Hz screen does not sacrifice sharpness for frame rate), and steps down when
-     they do not. A step that failed becomes the ceiling for a while, so it settles. */
+     Quality steps are pixel budgets. Auto probes upward one step at a time while frames
+     keep pace with the display (60 fps is the target, so a 120 Hz screen does not trade
+     sharpness for frame rate) and steps down when they do not. A step that failed
+     becomes the ceiling until the window size changes, so it settles and stays settled.
+     Sharp works the same way but accepts down to 40 fps, and starts high. */
   var STEPS = [60000, 90000, 130000, 180000, 250000, 340000, 460000, 620000, 820000,
                1100000, 1450000, 1900000, 2500000, 3300000, 4300000];
   var QUALITIES = ['auto', 'sharp', 'fast'];
   var QLABEL = { auto: 'Quality: Auto', sharp: 'Quality: Sharp', fast: 'Quality: Fast' };
   var quality = 'auto';
   try { var qs = localStorage.getItem('mirrorsea.quality'); if (QUALITIES.indexOf(qs) >= 0) quality = qs; } catch (e) {}
-  var step = touch ? 6 : 8, ceiling = STEPS.length - 1, atNative = false;
+  var step = quality === 'sharp' ? 12 : touch ? 6 : 8, ceiling = STEPS.length - 1, atNative = false;
   function resize() {
     var w = stage.clientWidth || 320, h = stage.clientHeight || 480;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var budget = quality === 'sharp' ? Infinity : quality === 'fast' ? STEPS[4] : STEPS[step];
+    var budget = quality === 'fast' ? STEPS[4] : STEPS[step];
     var scale = Math.min(dpr, Math.sqrt(budget / (w * h)));
     atNative = scale >= dpr - 1e-3;
     var cw = Math.max(48, Math.round(w * scale)), ch = Math.max(48, Math.round(h * scale));
     if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
     gl.viewport(0, 0, cw, ch);
   }
-  window.addEventListener('resize', resize);
+  var lastSize = '';
+  window.addEventListener('resize', function () {
+    // a new window size changes the cost per step, so let quality look upward again
+    var sz = stage.clientWidth + 'x' + stage.clientHeight;
+    if (sz !== lastSize) { lastSize = sz; ceiling = STEPS.length - 1; ft = []; }
+    resize();
+  });
   resize();
 
-  var ft = [], baseFrame = 1 / 30, lastChange = 0, lastUp = -1e9;
+  var ft = [], baseFrame = 1 / 30, lastChange = 0, lastUp = -1e9, perf = { fps: 0 };
   function nativePx() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     return (stage.clientWidth || 320) * (stage.clientHeight || 480) * dpr * dpr;
@@ -910,19 +941,19 @@ void main() {
     ft = [];
     // the display's refresh interval: the fastest pace seen, never slower than 30 Hz
     baseFrame = Math.max(1 / 144, Math.min(baseFrame, med, 1 / 30));
-    var ok = med <= Math.max(baseFrame * 1.15, 1 / 55) && slow < n / 12;
-    if (quality !== 'auto' || now - lastChange < 1200) return;
+    var target = Math.max(baseFrame * 1.15, quality === 'sharp' ? 1 / 40 : 1 / 55);
+    var ok = med <= target && slow < n / 12;
+    perf.fps = 1 / med;
+    if (quality === 'fast' || now - lastChange < 1200) return;
     if (!ok && step > 0) {
       if (now - lastUp < 8000) ceiling = step - 1;                      // the probe failed: stop there
       // steps above native resolution look identical, so skip straight past them
       var top = 0, np = nativePx();
       while (top < STEPS.length - 1 && STEPS[top + 1] < np * 0.9) top++;
-      step = Math.min(step - 1, top);
+      step = Math.max(0, Math.min(step - (med > target * 3 ? 3 : 1), top));   // far too slow: drop faster
       lastChange = now; resize();
     } else if (ok && step < ceiling && !atNative && now - lastChange > 2500) {
       step++; lastUp = lastChange = now; resize();
-    } else if (ok && step === ceiling && ceiling < STEPS.length - 1 && now - lastChange > 45000) {
-      ceiling++;                                                         // conditions may have improved
     }
   }
 
@@ -1343,13 +1374,18 @@ void main() {
   function smoothstep(e0, e1, x) { var u = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return u * u * (3 - 2 * u); }
 
   /* ---------- Frame loop ---------- */
+  var skipFrame = false;
+  document.addEventListener('visibilitychange', function () { skipFrame = true; });
   var tPrev = 0, time = 0, camZ = 0, vel = 2.6, sdt = 1 / 60, frozen = false, meterTick = 0;
   var meterBar = $('meter').firstChild;
   function frame(now) {
     requestAnimationFrame(frame);
     var raw = tPrev ? (now - tPrev) / 1000 : 1 / 60;
     tPrev = now;
-    var hitch = raw > 1;             // tab was hidden or the device slept: not a speed sample
+    // a frame right after the tab was hidden (or the device slept) is not a speed sample;
+    // a merely slow frame is, however long it took
+    var hitch = skipFrame || raw > 8;
+    skipFrame = false;
     if (hitch) raw = 1 / 60;
     // smooth the frame time: uneven rAF timing was a big source of judder
     sdt += (Math.min(raw, 0.1) - sdt) * 0.12;
@@ -1451,14 +1487,42 @@ void main() {
   $('logoBtn').addEventListener('click', function () {
     setLogo(LOGO_MODES[(LOGO_MODES.indexOf(logoMode) + 1) % LOGO_MODES.length]);
   });
+  function gpuAdvice() {
+    if (softwareGpu) return 'Your browser is drawing this WITHOUT your graphics card (software rendering), which makes it very slow on any PC.\n' +
+      'Fix: Chrome or Edge: Settings > System > turn on "Use graphics acceleration when available", then restart the browser. ' +
+      'Firefox: Settings > General > Performance > turn on hardware acceleration.';
+    if (lowPowerGpu) return 'Your browser is using the built-in, low-power graphics chip. If this PC has a dedicated graphics card:\n' +
+      'Windows Settings > System > Display > Graphics > add your browser > Options > High performance, then restart the browser.';
+    return '';
+  }
+  function infoText() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var sw = Math.round(stage.clientWidth * dpr), sh = Math.round(stage.clientHeight * dpr);
+    var pct = Math.round(100 * canvas.width * canvas.height / Math.max(1, sw * sh));
+    var adv = gpuAdvice();
+    return 'Graphics: ' + gpuName + '\n' +
+      'Frame rate: ' + (perf.fps ? Math.round(perf.fps) + ' fps' : 'measuring...') + '\n' +
+      'Drawing ' + canvas.width + ' x ' + canvas.height + ' of ' + sw + ' x ' + sh + ' (' + pct + '% of the pixels)\n' +
+      QLABEL[quality] + (adv ? '\n\n' + adv : '');
+  }
+  var infoOn = false;
+  function toggleInfo(v) {
+    infoOn = typeof v === 'boolean' ? v : !infoOn;
+    $('info').classList.toggle('on', infoOn);
+    if (infoOn) $('info').textContent = infoText();
+  }
+  setInterval(function () { if (infoOn) $('info').textContent = infoText(); }, 500);
+  $('infoBtn').addEventListener('click', function () { toggleInfo(); });
+  if (softwareGpu || lowPowerGpu) { toggleInfo(true); setStatus(softwareGpu ? 'Running without your graphics card, so it will be slow. See the box at the top right.' : 'Running on the low-power graphics chip. See the box at the top right.'); }
   function showQuality() { $('qualBtn').textContent = QLABEL[quality]; }
   showQuality();
   $('qualBtn').addEventListener('click', function () {
     quality = QUALITIES[(QUALITIES.indexOf(quality) + 1) % QUALITIES.length];
     try { localStorage.setItem('mirrorsea.quality', quality); } catch (e) {}
-    if (quality === 'auto') { ceiling = STEPS.length - 1; ft = []; lastChange = performance.now(); }
+    ceiling = STEPS.length - 1; ft = []; lastChange = performance.now();
+    if (quality === 'sharp') step = Math.max(step, 12);
     showQuality(); resize();
-    setStatus(quality === 'sharp' ? 'Sharp: full screen resolution, even if frames drop.' :
+    setStatus(quality === 'sharp' ? 'Sharp: as sharp as this device can draw at 40 fps or more.' :
               quality === 'fast' ? 'Fast: low resolution for slower devices.' :
               'Auto: as sharp as this device can keep smooth.');
   });
@@ -1488,6 +1552,7 @@ void main() {
     if (e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') setScene(sceneIx + 1, false);
     else if (e.key === 'ArrowLeft') setScene(sceneIx - 1, false);
     else if (e.key === 'f' || e.key === 'F') toggleFull();
+    else if (e.key === 'i' || e.key === 'I') toggleInfo();
     else if (e.key === 'l' || e.key === 'L') setLogo(LOGO_MODES[(LOGO_MODES.indexOf(logoMode) + 1) % LOGO_MODES.length]);
     else if (e.key === 'h' || e.key === 'H') { clearTimeout(quietTimer); quietTimer = null; document.body.classList.toggle('quiet'); }
   });
@@ -1507,7 +1572,7 @@ void main() {
   }
 
   window.__viz = { setScene: setScene, freeze: function (v) { frozen = v; }, count: SCENES.length, spec: function () { return Array.from(specTex); },
-    stats: function () { return { w: canvas.width, h: canvas.height, step: step, ceiling: ceiling, dt: sdt, mode: mode, beatT: lastBeat, bpm: Math.round(60 / bt.P * 10) / 10, conf: Math.round(bt.conf * 100) / 100, locked: bt.locked, at: audioEl ? audioEl.currentTime : 0 }; } };
+    stats: function () { return { gpu: gpuName, sw: softwareGpu, fps: perf.fps, w: canvas.width, h: canvas.height, step: step, ceiling: ceiling, dt: sdt, mode: mode, beatT: lastBeat, bpm: Math.round(60 / bt.P * 10) / 10, conf: Math.round(bt.conf * 100) / 100, locked: bt.locked, at: audioEl ? audioEl.currentTime : 0 }; } };
 })();
 </script>
 </body>
