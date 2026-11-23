@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mirrorsea Visualizer</title>
+<meta name="description" content="A music visualizer that flies through a reflective landscape in time with whatever is playing.">
+<meta name="theme-color" content="#05070d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mirrorsea">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #f2f4f8;
+  --muted: #a9b4c6;
+  --panel: rgba(12, 16, 28, 0.62);
+  --line: rgba(255, 255, 255, 0.16);
+  --accent: #6ff2d2;
+  --accent-ink: #04201b;
+  --font-display: "Michroma", "Eurostile", "Arial Narrow", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: #05070d;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.4;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+#stage { position: fixed; inset: 0; background: #05070d; }
+#view { display: block; width: 100%; height: 100%; }
+
+.plate, .strip { transition: opacity 0.6s ease; }
+body.quiet .plate, body.quiet .strip { opacity: 0; pointer-events: none; }
+body.quiet { cursor: none; }
+
+.plate {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  left: max(16px, env(safe-area-inset-left));
+  right: max(16px, env(safe-area-inset-right));
+  display: flex; flex-direction: column; gap: 4px;
+  pointer-events: none;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65);
+}
+.plate h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+#sceneName {
+  font-family: var(--font-display);
+  font-size: clamp(18px, 4.6vw, 28px);
+  letter-spacing: 0.04em;
+  text-wrap: balance;
+}
+
+.strip {
+  position: absolute;
+  left: max(16px, env(safe-area-inset-left));
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  max-width: 680px;
+  margin: 0 auto;
+}
+.label { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+button, .filebtn {
+  appearance: none;
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+  font: 500 15px/1 var(--font-body);
+  cursor: pointer;
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+button:hover, .filebtn:hover { background: rgba(255, 255, 255, 0.14); }
+button:focus-visible, .filebtn:focus-within, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.primary:hover { background: #93f7df; }
+button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+button[hidden], .filebtn[hidden] { display: none; }
+.filebtn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.row.small button { min-height: 38px; font-size: 14px; }
+.meta {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  color: var(--muted); font-size: 13px;
+}
+#status { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.check { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+#meter { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; }
+#meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
+#fail {
+  position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+  padding: 24px; text-align: center; color: var(--ink); background: #05070d;
+}
+#fail p { max-width: 46ch; }
+@media (prefers-reduced-motion: reduce) { .plate, .strip { transition: none; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="view" aria-label="Animated landscape that moves with the music"></canvas>
+
+  <div class="plate">
+    <h1>Mirrorsea</h1>
+    <div id="sceneName">Chrome Lagoon</div>
+  </div>
+
+  <div class="strip">
+    <span class="label">Music source</span>
+    <div class="row">
+      <button id="micBtn" class="primary" type="button">Listen with mic</button>
+      <button id="tabBtn" type="button" hidden>Capture computer audio</button>
+      <label class="filebtn" id="fileLabel">Load a song
+        <input id="fileInput" type="file" accept="audio/*">
+      </label>
+      <button id="demoBtn" type="button">Demo track</button>
+      <button id="pauseBtn" type="button" hidden>Pause</button>
+    </div>
+    <div id="meter" aria-hidden="true"><i></i></div>
+    <div class="row small">
+      <button id="nextBtn" type="button">Next scene</button>
+      <button id="fullBtn" type="button">Full screen</button>
+    </div>
+    <div class="meta">
+      <span id="status" role="status" aria-live="polite">Pick a music source. The mic works on any phone or computer.</span>
+      <label class="check" for="autoScenes"><input id="autoScenes" type="checkbox" checked> Change scenes automatically</label>
+    </div>
+  </div>
+
+  <div id="fail"><p id="failText"></p></div>
+</div>
+
+<script id="frag" type="x-shader/x-fragment">
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime, uCamZ, uFocal;
+uniform vec3 uCam;
+uniform vec2 uLook;
+uniform vec4 uAudio;            // bass, mid, treble, beat pulse
+uniform sampler2D uSpec, uWave; // 64 band spectrum, 256 sample waveform
+uniform vec3 uSkyTop, uSkyHor, uSunCol, uSun, uTerA, uTerB, uWater, uPilCol, uSphTint, uAur;
+uniform vec4 uA;                // terrain height, terrace, snow, cloud
+uniform vec4 uB;                // pillar gain, sphere size, checker, ripple
+uniform vec4 uC;                // fog density, ribbon amount, stars, flash
+
+const float FAR = 150.0;
+const float SL = 28.0;
+const float PS = 2.4;
+const float PX = 4.2;
+const float PRANGE = 58.0;
+
+float hash1(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+float hash2(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float noise(vec2 x) {
+  vec2 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x),
+             mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm3(vec2 p) {
+  float a = 0.5, s = 0.0;
+  for (int i = 0; i < 3; i++) { s += a * noise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p; a *= 0.5; }
+  return s;
+}
+float fbm4(vec2 p) {
+  float a = 0.5, s = 0.0;
+  for (int i = 0; i < 4; i++) { s += a * noise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p; a *= 0.5; }
+  return s;
+}
+
+float terr(vec2 p) {
+  float cx = p.x + 3.0 * sin(p.y * 0.031);
+  float m = smoothstep(9.0, 26.0, abs(cx));
+  if (m <= 0.0) return -1.0;
+  float n = fbm4(p * 0.055 + 17.0);
+  float h = n * n * 2.4 * uA.x;
+  float ts = uA.x * 0.17;
+  float q = h / ts;
+  float th = (floor(q) + smoothstep(0.4, 1.0, fract(q))) * ts;
+  h = mix(h, th, uA.y);
+  return h * m + (m - 1.0);
+}
+
+vec3 hazeCol(vec3 rd) {
+  vec2 a = normalize(rd.xz + vec2(1e-5));
+  vec2 b = normalize(uSun.xz);
+  float sd = max(dot(a, b), 0.0);
+  return uSkyHor + uSunCol * pow(sd, 10.0) * 0.35;
+}
+
+vec3 sky(vec3 rd) {
+  float y = max(rd.y, 0.0);
+  vec3 c = mix(uSkyHor, uSkyTop, 1.0 - exp(-y * 3.2));
+  float sd = max(dot(rd, uSun), 0.0);
+  c += uSunCol * pow(sd, 10.0) * 0.3 * (1.0 + 0.6 * uAudio.x);
+  c = mix(c, hazeCol(rd), exp(-y * 16.0));
+
+  if (uC.z > 0.01 && rd.y > 0.0) {
+    vec2 sp = rd.xz / (rd.y + 0.3) * 70.0;
+    float hs = hash2(floor(sp));
+    vec2 fp = fract(sp) - 0.5;
+    float st = step(0.975, hs) * smoothstep(0.3, 0.0, length(fp));
+    c += vec3(st) * uC.z * (0.5 + 1.2 * uAudio.z * fract(hs * 91.7)) * smoothstep(0.02, 0.3, rd.y);
+  }
+
+  float cl = 0.0;
+  if (rd.y > 0.015 && uA.w > 0.01) {
+    vec2 uv = rd.xz / (rd.y + 0.1) * 1.1 + vec2(uTime * 0.015, uCamZ * 0.004);
+    float d = fbm3(uv) + (uA.w - 0.5) * 0.35;
+    cl = smoothstep(0.42, 0.78, d) * smoothstep(0.015, 0.16, rd.y);
+    vec3 cc = mix(uSkyHor * 0.9 + uSunCol * 0.5 * pow(sd, 3.0), vec3(1.0), 0.3 + 0.4 * y);
+    c = mix(c, cc, cl * 0.85);
+  }
+
+  c += uSunCol * (smoothstep(0.9993, 0.9997, sd) * 4.0 + pow(sd, 180.0) * 1.2) * (1.0 - cl * 0.7);
+
+  float az = atan(rd.x, rd.z);
+  float u = clamp(az / 2.4 + 0.5, 0.0, 1.0);
+  float w = texture2D(uWave, vec2(u, 0.5)).r * 2.0 - 1.0;
+  float cy = 0.36 + 0.04 * sin(az * 3.0 + uTime * 0.3) + w * 0.2;
+  float dy = rd.y - cy;
+  float g = exp(-abs(dy) * 60.0) * 1.7 + step(0.0, dy) * exp(-dy * 7.0) * 0.28;
+  c += uAur * g * uC.y * (0.4 + 0.9 * uAudio.z + 0.6 * uAudio.w) * (1.0 - cl * 0.5);
+  return c;
+}
+
+vec4 sphereAt(float id) {
+  float h1 = hash1(id * 1.37 + 3.1), h2 = hash1(id * 7.13 + 1.7);
+  float k = mod(id, 3.0);
+  float r = (0.8 + 0.9 * h1) * uB.y * (1.0 + 0.15 * uAudio.x + 0.15 * uAudio.w);
+  float bob = 0.35 * sin(uTime * 0.7 + id * 2.1);
+  float x = 7.6 + 2.5 * h2;
+  float y = r + 0.5 + 1.5 * h1 + bob;
+  if (k < 0.5) x = -x;
+  else if (k > 1.5) { x = (h2 - 0.5) * 2.4; y = r + 6.6 + 1.2 * h1 + bob; }
+  return vec4(x, y, (id + 0.5) * SL, r);
+}
+vec4 nearSphere(vec3 p) {
+  float fi = floor(p.z / SL);
+  float nb = fi + (fract(p.z / SL) > 0.5 ? 1.0 : -1.0);
+  vec4 a = sphereAt(fi), b = sphereAt(nb);
+  return (length(p - a.xyz) - a.w < length(p - b.xyz) - b.w) ? a : b;
+}
+float sdSpheres(vec3 p) {
+  if (uB.y < 0.01) return 1e5;
+  vec4 s = nearSphere(p);
+  return length(p - s.xyz) - s.w;
+}
+
+float pillarLevel(float cz) {
+  float u = (cz - uCamZ) / PRANGE;
+  return (u > 0.0 && u < 1.0) ? texture2D(uSpec, vec2(u, 0.5)).r : 0.0;
+}
+float sdPillars(vec3 p) {
+  if (uB.x < 0.01) return 1e5;
+  float ax = abs(p.x) - PX;
+  if (abs(ax) > 1.6) return abs(ax) - 0.6;
+  float d = 1e5;
+  float ci = floor(p.z / PS);
+  for (int k = -1; k <= 1; k++) {
+    float cz = (ci + float(k) + 0.5) * PS;
+    float h = 0.25 + pillarLevel(cz) * uB.x;
+    vec3 b = abs(vec3(ax, p.y - h * 0.5, p.z - cz)) - vec3(0.5, h * 0.5, 0.5);
+    d = min(d, length(max(b, 0.0)) + min(max(b.x, max(b.y, b.z)), 0.0));
+  }
+  return d;
+}
+
+float map(vec3 p, out float m) {
+  float d = (p.y - terr(p.xz)) * mix(0.55, 0.32, uA.y);
+  m = 1.0;
+  float ds = sdSpheres(p);
+  if (ds < d) { d = ds; m = 2.0; }
+  float dp = sdPillars(p);
+  if (dp < d) { d = dp; m = 3.0; }
+  return d;
+}
+
+float march(vec3 ro, vec3 rd, float tmax, int n, out float m) {
+  float t = 0.05;
+  float mm = 0.0;
+  m = 0.0;
+  for (int i = 0; i < 84; i++) {
+    if (i >= n) break;
+    float d = map(ro + rd * t, mm);
+    if (d < 0.0015 * t + 0.003) { m = mm; return t; }
+    t += d;
+    if (t > tmax) return t;
+  }
+  m = mm;
+  return t;
+}
+
+vec3 fogged(vec3 col, vec3 rd, float t) {
+  return mix(col, hazeCol(rd), 1.0 - exp(-t * uC.x));
+}
+
+vec3 shade(vec3 p, vec3 rd, float m, float t) {
+  vec3 amb = mix(uSkyHor, uSkyTop, 0.5);
+  if (m < 1.5) {
+    vec2 e = vec2(0.06, 0.0);
+    float h0 = terr(p.xz);
+    vec3 n = normalize(vec3(h0 - terr(p.xz + e.xy), e.x, h0 - terr(p.xz + e.yx)));
+    float alt = clamp(p.y / (2.0 * uA.x), 0.0, 1.0);
+    float slope = 1.0 - n.y;
+    // fine detail fades with distance so far slopes do not sparkle as the camera moves
+    float fine = 1.0 - smoothstep(8.0, 30.0, t);
+    float det = noise(p.xz * 1.7) * 0.6 + mix(0.15, noise(p.xz * 6.0), fine) * 0.3;
+    vec3 base = mix(uTerA, uTerB, smoothstep(0.15, 0.6, slope * 1.6 + alt * 0.6 + det * 0.25 - 0.1));
+    base *= 0.88 + 0.14 * sin(p.y * 5.0 + det * 4.0) * (0.3 + 0.7 * fine);
+    float sn = smoothstep(0.42, 0.66, alt + det * 0.2 - slope * 0.8) * uA.z;
+    base = mix(base, vec3(0.92, 0.95, 1.0), sn);
+    base = mix(base, uTerB * 1.25 + 0.08, smoothstep(0.5, 0.0, p.y) * 0.5);
+    float dif = max(dot(n, uSun), 0.0);
+    float fill = max(dot(n, normalize(vec3(-uSun.x, 0.5, -uSun.z))), 0.0);
+    return base * (uSunCol * dif * 1.9 + amb * (0.6 + 0.4 * n.y) + uSkyHor * fill * 0.45);
+  }
+  if (m < 2.5) {
+    vec4 s = nearSphere(p);
+    vec3 n = normalize(p - s.xyz);
+    vec3 r = reflect(rd, n);
+    vec3 env;
+    if (r.y >= 0.0) env = sky(r);
+    else env = mix(uWater, sky(vec3(r.x, -r.y, r.z)), 0.55) * 0.85;
+    float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+    return env * uSphTint + uAur * rim * (0.15 + 0.9 * uAudio.w);
+  }
+  float cz = (floor(p.z / PS) + 0.5) * PS;
+  float u = clamp((cz - uCamZ) / PRANGE, 0.0, 1.0);
+  float lv = pillarLevel(cz);
+  float h = 0.25 + lv * uB.x;
+  vec2 e = vec2(0.01, 0.0);
+  vec3 n = normalize(vec3(sdPillars(p + e.xyy) - sdPillars(p - e.xyy),
+                          sdPillars(p + e.yxy) - sdPillars(p - e.yxy),
+                          sdPillars(p + e.yyx) - sdPillars(p - e.yyx)));
+  vec3 r = reflect(rd, n);
+  float fr = 0.08 + 0.92 * pow(1.0 - max(dot(-rd, n), 0.0), 4.0);
+  vec3 env = r.y > 0.0 ? sky(r) : mix(uWater, hazeCol(r), 0.5);
+  vec3 col = uPilCol * (uSunCol * max(dot(n, uSun), 0.0) + amb * 0.6);
+  col = mix(col, env, fr * 0.8);
+  vec3 hue = mix(uAur, uSunCol, u);
+  if (n.y > 0.5) {
+    col += hue * (0.08 + 1.0 * lv);
+  } else {
+    float band = smoothstep(0.40, 0.48, abs(fract(p.y * 1.2) - 0.5));
+    float top = smoothstep(h - 0.6, h, p.y);
+    col += hue * (band * 0.5 + top * 1.3) * (0.12 + 1.6 * lv);
+  }
+  return col;
+}
+
+vec3 render(vec3 ro, vec3 rd) {
+  float HB = max(2.2 * uA.x, 15.5);
+  float tmax = FAR;
+  float tw = -1.0;
+  if (rd.y < 0.0) { tw = -ro.y / rd.y; tmax = min(tmax, tw); }
+  else if (rd.y > 0.0) { tmax = min(tmax, (HB - ro.y) / rd.y); }
+
+  float m;
+  float t = march(ro, rd, tmax, 84, m);
+  if (m > 0.5 && t <= tmax) return fogged(shade(ro + rd * t, rd, m, t), rd, t);
+  if (tw < 0.0) return sky(rd);
+
+  vec3 pw = ro + rd * tw;
+  vec2 q = pw.xz * 0.9 + vec2(0.0, uTime * 0.6);
+  float amp = uB.w * (1.0 - uB.z) * (0.5 + uAudio.y) / (1.0 + tw * 0.06);
+  float e = 0.15;
+  vec3 n = normalize(vec3((noise(q + vec2(e, 0.0)) - noise(q - vec2(e, 0.0))) * amp, 1.0,
+                          (noise(q + vec2(0.0, e)) - noise(q - vec2(0.0, e))) * amp));
+  vec3 rr = reflect(rd, n);
+  rr.y = abs(rr.y) + 0.004;
+  rr = normalize(rr);
+  float fres = 0.04 + 0.96 * pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
+
+  vec3 refl;
+  if (tw < FAR) {
+    float m2;
+    vec3 o2 = pw + vec3(0.0, 0.03, 0.0);
+    float tmax2 = min(FAR, (HB - 0.03) / rr.y);
+    float t2 = march(o2, rr, tmax2, 40, m2);
+    if (m2 > 0.5 && t2 <= tmax2) refl = fogged(shade(o2 + rr * t2, rr, m2, tw + t2), rr, t2);
+    else refl = sky(rr);
+  } else {
+    refl = sky(rr);
+  }
+
+  vec3 amb = mix(uSkyHor, uSkyTop, 0.5);
+  // checker fades out sooner so distant tiles do not crawl
+  float chk = mod(floor(pw.x * 0.5) + floor(pw.z * 0.5), 2.0);
+  chk = mix(chk, 0.5, smoothstep(14.0, 55.0, tw));
+  vec3 tile = mix(vec3(0.03), vec3(0.9), chk) * (uSunCol * max(uSun.y, 0.15) * 1.3 + amb * 0.6);
+  vec3 base = mix(uWater * (0.5 + 0.5 * amb), tile, uB.z);
+  float R = mix(mix(0.5, 0.3, uB.z), 1.0, fres);
+  vec3 col = mix(base, refl, R);
+  return fogged(col, rd, tw);
+}
+
+void main() {
+  vec2 uv = (2.0 * gl_FragCoord.xy - uRes) / uRes.y;
+  vec3 ro = vec3(uCam.x, uCam.y, uCamZ);
+  float yaw = uLook.x, pitch = uLook.y, roll = uCam.z;
+  vec3 fw = normalize(vec3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)));
+  vec3 rt = normalize(cross(vec3(0.0, 1.0, 0.0), fw));
+  vec3 up = cross(fw, rt);
+  rt = rt * cos(roll) + up * sin(roll);
+  up = cross(fw, rt);
+  vec3 rd = normalize(uv.x * rt + uv.y * up + uFocal * fw);
+
+  vec3 col = render(ro, rd);
+  col += uAur * 0.05 * uAudio.w * uC.w;
+
+  col = 1.0 - exp(-col * 1.3);
+  col = pow(col, vec3(0.4545));
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(lum), col, 1.15);
+  vec2 sc = gl_FragCoord.xy / uRes;
+  col *= 0.72 + 0.28 * pow(16.0 * sc.x * sc.y * (1.0 - sc.x) * (1.0 - sc.y), 0.18);
+  col += (hash2(gl_FragCoord.xy + fract(uTime) * 61.0) - 0.5) / 255.0;
+  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var canvas = $('view'), stage = $('stage');
+  var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+  function fail(msg) {
+    $('failText').textContent = msg;
+    $('fail').style.display = 'flex';
+  }
+  function setStatus(s) { $('status').textContent = s; }
+
+  /* ---------- Scenes ---------- */
+  var SCENES = [
+    { name: 'Chrome Lagoon',
+      skyTop: [0.08, 0.30, 0.78], skyHor: [0.98, 0.62, 0.42], sunCol: [1.0, 0.74, 0.42], sunAz: 0.22, sunEl: 0.15,
+      terA: [0.16, 0.42, 0.14], terB: [0.56, 0.42, 0.28], water: [0.02, 0.24, 0.30],
+      pilCol: [0.05, 0.07, 0.10], sphTint: [0.95, 0.97, 1.0], aur: [0.25, 1.0, 0.82],
+      A: [9.0, 0.0, 0.0, 0.55], B: [4.0, 1.0, 0.0, 0.25], C: [0.009, 0.8, 0.0], speed: 2.6 },
+    { name: 'Violet Mesa',
+      skyTop: [0.14, 0.04, 0.36], skyHor: [0.96, 0.34, 0.50], sunCol: [1.0, 0.46, 0.32], sunAz: -0.20, sunEl: 0.10,
+      terA: [0.62, 0.26, 0.14], terB: [0.36, 0.12, 0.20], water: [0.10, 0.03, 0.20],
+      pilCol: [0.10, 0.02, 0.12], sphTint: [1.0, 0.80, 0.45], aur: [1.0, 0.32, 0.9],
+      A: [8.0, 1.0, 0.0, 0.30], B: [5.0, 0.8, 0.0, 0.12], C: [0.011, 0.9, 0.25], speed: 2.2 },
+    { name: 'Checker Infinity',
+      skyTop: [0.02, 0.14, 0.50], skyHor: [0.56, 0.80, 0.96], sunCol: [1.0, 0.97, 0.90], sunAz: 0.30, sunEl: 0.42,
+      terA: [0.74, 0.75, 0.80], terB: [0.40, 0.42, 0.50], water: [0.05, 0.10, 0.16],
+      pilCol: [0.02, 0.02, 0.02], sphTint: [1.0, 1.0, 1.0], aur: [1.0, 0.88, 0.3],
+      A: [12.0, 0.0, 0.85, 0.75], B: [6.0, 1.3, 1.0, 0.0], C: [0.006, 0.6, 0.0], speed: 3.2 },
+    { name: 'Mercury Dawn',
+      skyTop: [0.34, 0.45, 0.62], skyHor: [1.0, 0.90, 0.70], sunCol: [1.0, 0.85, 0.60], sunAz: 0.05, sunEl: 0.08,
+      terA: [0.25, 0.25, 0.22], terB: [0.50, 0.48, 0.42], water: [0.35, 0.38, 0.40],
+      pilCol: [0.12, 0.12, 0.13], sphTint: [1.0, 1.0, 1.0], aur: [0.5, 0.72, 1.0],
+      A: [7.0, 0.0, 0.2, 0.25], B: [2.5, 1.5, 0.0, 0.40], C: [0.017, 1.0, 0.0], speed: 1.9 },
+    { name: 'Emerald Midnight',
+      skyTop: [0.0, 0.02, 0.08], skyHor: [0.02, 0.24, 0.30], sunCol: [0.70, 0.90, 1.0], sunAz: -0.28, sunEl: 0.32,
+      terA: [0.02, 0.12, 0.10], terB: [0.08, 0.10, 0.16], water: [0.0, 0.05, 0.08],
+      pilCol: [0.0, 0.03, 0.03], sphTint: [0.85, 1.0, 0.95], aur: [0.2, 1.0, 0.42],
+      A: [10.0, 0.0, 0.55, 0.40], B: [6.0, 1.0, 0.0, 0.20], C: [0.008, 1.7, 1.0], speed: 2.8 }
+  ];
+  function lin(c) { return c.map(function (v) { return Math.pow(v, 2.2); }); }
+  function flat(s) {
+    return [].concat(lin(s.skyTop), lin(s.skyHor), lin(s.sunCol), [s.sunAz, s.sunEl], lin(s.terA), lin(s.terB), lin(s.water),
+      lin(s.pilCol), lin(s.sphTint), lin(s.aur), s.A, s.B, s.C, [s.speed]);
+  }
+  var sceneIx = 0, P = flat(SCENES[0]), Pfrom = P.slice(), Pto = P.slice(), blend = 1, sceneClock = 0;
+  function setScene(i, instant) {
+    sceneIx = (i + SCENES.length) % SCENES.length;
+    Pfrom = P.slice(); Pto = flat(SCENES[sceneIx]); blend = instant ? 1 : 0; sceneClock = 0;
+    if (instant) P = Pto.slice();
+    $('sceneName').textContent = SCENES[sceneIx].name;
+  }
+
+  /* ---------- WebGL ---------- */
+  var gl = canvas.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'high-performance' }) ||
+           canvas.getContext('experimental-webgl');
+  if (!gl) { fail('This browser could not start WebGL, which the visualizer needs. Try a current version of Safari, Chrome or Firefox.'); return; }
+
+  function compile(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) || 'shader compile failed');
+    return s;
+  }
+  var prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }'));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, $('frag').textContent));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link failed');
+  } catch (err) {
+    window.__vizError = String(err.message || err);
+    fail('The graphics chip in this device rejected the landscape shader. Details: ' + window.__vizError);
+    return;
+  }
+  gl.useProgram(prog);
+  var buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  var loc = gl.getAttribLocation(prog, 'p');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+  var U = {};
+  ['uRes', 'uTime', 'uCamZ', 'uFocal', 'uCam', 'uLook', 'uAudio', 'uSpec', 'uWave', 'uSkyTop', 'uSkyHor', 'uSunCol', 'uSun',
+   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC'].forEach(function (n) {
+    U[n] = gl.getUniformLocation(prog, n);
+  });
+
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  function makeTex(unit, w) {
+    var t = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array(w));
+    return t;
+  }
+  var specTex = new Uint8Array(64), waveTex = new Uint8Array(256), waveF = new Float32Array(256);
+  for (var wi = 0; wi < 256; wi++) waveF[wi] = 128;
+  makeTex(0, 64); makeTex(1, 256);
+  gl.uniform1i(U.uSpec, 0); gl.uniform1i(U.uWave, 1);
+
+  /* ---------- Render resolution ----------
+     The old version re-scaled every 40 frames in both directions, so the picture kept
+     popping between sharp and soft. Now: a few fixed quality steps, a long measuring
+     window, and a cooldown, so the resolution settles and stays put. */
+  var STEPS = [60000, 90000, 130000, 180000, 250000, 340000, 460000, 620000, 820000];
+  var step = touch ? 3 : 5;
+  var lastScaleChange = 0, downgrades = 0;
+  function resize() {
+    var w = stage.clientWidth || 320, h = stage.clientHeight || 480;
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var scale = Math.min(dpr, Math.sqrt(STEPS[step] / (w * h)));
+    var cw = Math.max(48, Math.round(w * scale)), ch = Math.max(48, Math.round(h * scale));
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+    gl.viewport(0, 0, cw, ch);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  /* ---------- Audio ----------
+     analyser is a silent tap. Sources you should hear (demo, a loaded song) are also
+     routed to the speakers; captured sources (mic, computer audio) are not, so there
+     is no echo or feedback. */
+  var ctx = null, analyser = null, audioEl = null, elSrc = null, objUrl = null, demo = null, mode = 'idle';
+  var stream = null, streamSrc = null, streamGain = null;
+  var freq = new Uint8Array(1024), td = new Uint8Array(2048), spec = new Float32Array(64);
+  var bass = 0, mid = 0, treb = 0, beat = 0, beatEnv = 0, energy = 0, bassAvg = 0.3, lastBeat = 0;
+  var gB = 0.3, gM = 0.3, gT = 0.3, beatHit = false, level = 0;
+
+  function ensureCtx() {
+    if (!ctx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ctx = new AC();
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.78;
+      analyser.minDecibels = -90; analyser.maxDecibels = -18;
+    }
+    if (ctx.state === 'suspended') { ctx.resume().catch(function () {}); }
+    return true;
+  }
+  function live() {
+    if (!ctx || ctx.state !== 'running') return false;
+    if (mode === 'demo' || mode === 'mic' || mode === 'tab') return true;
+    return mode === 'file' && audioEl && !audioEl.paused;
+  }
+  function refreshButtons() {
+    $('micBtn').classList.toggle('on', mode === 'mic');
+    $('micBtn').textContent = mode === 'mic' ? 'Stop listening' : 'Listen with mic';
+    $('tabBtn').classList.toggle('on', mode === 'tab');
+    $('tabBtn').textContent = mode === 'tab' ? 'Stop capture' : 'Capture computer audio';
+    $('demoBtn').classList.toggle('on', mode === 'demo');
+    $('demoBtn').textContent = mode === 'demo' ? 'Stop demo' : 'Demo track';
+    $('pauseBtn').hidden = mode !== 'file';
+    $('micBtn').classList.toggle('primary', mode === 'idle');
+  }
+
+  // Demo track: a short original loop, synthesized on the fly.
+  var BPM = 116, S16 = 60 / BPM / 4;
+  var CHORDS = [[57, 60, 64, 67], [53, 57, 60, 64], [50, 53, 57, 60], [52, 55, 59, 62]];
+  var ROOTS = [33, 29, 26, 28];
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function env(g, t, peak, dur) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  function tone(type, f, t, dur, peak, cutoff, dest) {
+    var o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(cutoff, t);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(80, cutoff * 0.3), t + dur);
+    env(g, t, peak, dur);
+    o.connect(lp); lp.connect(g); g.connect(dest);
+    o.start(t); o.stop(t + dur + 0.05);
+    return o;
+  }
+  function hit(t, type, f, q, peak, dur) {
+    var s = ctx.createBufferSource(), flt = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = demo.noise; flt.type = type; flt.frequency.value = f; flt.Q.value = q;
+    env(g, t, peak, dur);
+    s.connect(flt); flt.connect(g); g.connect(demo.out);
+    s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05);
+  }
+  function schedule(st, t) {
+    var barAbs = Math.floor(st / 16), bar = barAbs % 4, s = st % 16, ch = CHORDS[bar];
+    var phase = barAbs % 16, drums = barAbs >= 2 && phase < 14, full = barAbs >= 4;
+    if (drums && s % 4 === 0) {
+      var o = tone('sine', 150, t, 0.32, 0.95, 2000, demo.out);
+      o.frequency.exponentialRampToValueAtTime(44, t + 0.12);
+    }
+    if (full && phase < 15) {
+      if (s % 4 === 2) hit(t, 'highpass', 7000, 0.7, 0.22, 0.07);
+      else if (s % 2 === 1) hit(t, 'highpass', 9000, 0.7, 0.07, 0.03);
+      if (s === 4 || s === 12) hit(t, 'bandpass', 1600, 0.9, 0.5, 0.14);
+    }
+    if (drums && [0, 3, 6, 10, 11, 14].indexOf(s) >= 0) {
+      tone('sawtooth', mtof(ROOTS[bar] + (s === 11 ? 12 : 0)), t, S16 * 1.6, 0.34, 520, demo.out);
+    }
+    var note = ch[(s * 3) % 4] + (s % 8 >= 4 ? 12 : 0) + 12;
+    tone('square', mtof(note), t, 0.2, 0.07, 2600, demo.send);
+    if (s === 0) {
+      for (var i = 0; i < ch.length; i++) {
+        var p = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+        p.type = 'sawtooth'; p.frequency.value = mtof(ch[i]) * (1 + (i - 1.5) * 0.002);
+        lp.type = 'lowpass'; lp.frequency.value = 900;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.045, t + S16 * 6);
+        g.gain.linearRampToValueAtTime(0.0001, t + S16 * 16.5);
+        p.connect(lp); lp.connect(g); g.connect(demo.out);
+        p.start(t); p.stop(t + S16 * 17);
+      }
+    }
+  }
+  function startDemo() {
+    if (!ensureCtx()) { setStatus('This browser has no Web Audio support.'); return; }
+    stopAudio();
+    var out = ctx.createGain(), comp = ctx.createDynamicsCompressor(), send = ctx.createGain();
+    var dl = ctx.createDelay(1.0), fb = ctx.createGain();
+    out.gain.value = 0.75; dl.delayTime.value = S16 * 3; fb.gain.value = 0.36;
+    send.connect(out); send.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(out);
+    out.connect(comp); comp.connect(analyser); comp.connect(ctx.destination);
+    var nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), d = nb.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    demo = { out: out, comp: comp, send: send, noise: nb, next: ctx.currentTime + 0.08, step: 0 };
+    demo.timer = setInterval(function () {
+      if (!demo) return;
+      while (demo.next < ctx.currentTime + 0.3) { schedule(demo.step, demo.next); demo.next += S16; demo.step++; }
+    }, 50);
+    mode = 'demo';
+    refreshButtons();
+    setStatus('Demo track playing: a built-in loop generated in your browser.');
+  }
+  function stopStream() {
+    if (streamSrc) { try { streamSrc.disconnect(); } catch (e) {} streamSrc = null; }
+    if (streamGain) { try { streamGain.disconnect(); } catch (e) {} streamGain = null; }
+    if (stream) { stream.getTracks().forEach(function (t) { t.onended = null; t.stop(); }); stream = null; }
+  }
+  function stopAudio() {
+    if (demo) {
+      clearInterval(demo.timer);
+      try { demo.out.gain.setTargetAtTime(0, ctx.currentTime, 0.03); } catch (e) {}
+      var c = demo.comp; setTimeout(function () { try { c.disconnect(); } catch (e) {} }, 400);
+      demo = null;
+    }
+    if (audioEl) audioEl.pause();
+    stopStream();
+    mode = 'idle';
+    refreshButtons();
+    releaseWake();
+  }
+  function attachStream(s, kind, boost) {
+    stream = s;
+    streamSrc = ctx.createMediaStreamSource(s);
+    streamGain = ctx.createGain();
+    streamGain.gain.value = boost;
+    streamSrc.connect(streamGain); streamGain.connect(analyser);   // not to the speakers
+    gB = gM = gT = 0.1;   // let auto-gain re-learn the new source's loudness
+    mode = kind;
+    s.getAudioTracks().forEach(function (t) {
+      t.onended = function () { if (mode === kind) { stopAudio(); setStatus('Audio source ended. Pick another one.'); } };
+    });
+    refreshButtons();
+    requestWake();
+  }
+
+  function startMic() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('This browser cannot use the microphone here. Make sure the page is opened over https.');
+      return;
+    }
+    if (!ensureCtx()) { setStatus('This browser has no Web Audio support.'); return; }
+    stopAudio();
+    setStatus('Asking for microphone access...');
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    }).then(function (s) {
+      ensureCtx();
+      attachStream(s, 'mic', 2.5);
+      setStatus('Listening through the mic. Play music nearby, on any speaker, phone or computer.');
+    }).catch(function (err) {
+      var name = err && err.name;
+      if (name === 'NotAllowedError' || name === 'SecurityError')
+        setStatus('Microphone access was blocked. Allow it in your browser’s site settings, then try again.');
+      else if (name === 'NotFoundError')
+        setStatus('No microphone was found on this device.');
+      else setStatus('The microphone could not start: ' + (err && err.message ? err.message : name));
+    });
+  }
+
+  var canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !touch;
+  $('tabBtn').hidden = !canCapture;
+  function startCapture() {
+    if (!ensureCtx()) { setStatus('This browser has no Web Audio support.'); return; }
+    stopAudio();
+    setStatus('Choose a tab, window or screen, and turn on "Share audio".');
+    navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: 'include',
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include'
+    }).then(function (s) {
+      ensureCtx();
+      // only the sound is used; drop the picture right away
+      s.getVideoTracks().forEach(function (t) { t.stop(); s.removeTrack(t); });
+      if (!s.getAudioTracks().length) {
+        s.getTracks().forEach(function (t) { t.stop(); });
+        setStatus('No audio came through. Try again and tick "Share tab audio" (or "Share system audio" on Windows). On a Mac, pick the browser tab that is playing music.');
+        return;
+      }
+      attachStream(s, 'tab', 1);
+      setStatus('Capturing computer audio. Music from the shared tab or system now drives the visuals.');
+    }).catch(function (err) {
+      if (err && err.name === 'NotAllowedError') setStatus('Capture was cancelled.');
+      else setStatus('Computer audio capture is not available here: ' + (err && err.message ? err.message : err));
+    });
+  }
+
+  function loadFile(f) {
+    if (!f) return;
+    if (!ensureCtx()) { setStatus('This browser has no Web Audio support.'); return; }
+    stopAudio();
+    if (!audioEl) {
+      audioEl = new Audio();
+      audioEl.loop = true;
+      elSrc = ctx.createMediaElementSource(audioEl);
+      elSrc.connect(analyser);
+      elSrc.connect(ctx.destination);
+      audioEl.addEventListener('error', function () {
+        setStatus('That file would not play. Try an MP3, M4A or WAV file.');
+        mode = 'idle'; refreshButtons();
+      });
+    }
+    if (objUrl) URL.revokeObjectURL(objUrl);
+    objUrl = URL.createObjectURL(f);
+    audioEl.src = objUrl;
+    mode = 'file';
+    gB = gM = gT = 0.3;
+    refreshButtons();
+    var name = f.name || 'your song';
+    audioEl.play().then(function () {
+      $('pauseBtn').textContent = 'Pause';
+      setStatus('Playing ' + name);
+      requestWake();
+    }).catch(function () {
+      $('pauseBtn').textContent = 'Play';
+      setStatus('Loaded ' + name + '. Press Play to start.');
+    });
+  }
+
+  /* ---------- Keep the screen awake while music drives the visuals ---------- */
+  var wakeLock = null;
+  function requestWake() {
+    if (!('wakeLock' in navigator) || wakeLock) return;
+    navigator.wakeLock.request('screen').then(function (l) {
+      wakeLock = l; l.addEventListener('release', function () { wakeLock = null; });
+    }).catch(function () {});
+  }
+  function releaseWake() { if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; } }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      if (live()) requestWake();
+      if (ctx && ctx.state === 'suspended' && mode !== 'idle') ctx.resume().catch(function () {});
+    }
+  });
+
+  /* ---------- Analysis ---------- */
+  function analyse(dt, t) {
+    var i, rb = 0, rm = 0, rt = 0;
+    if (live()) {
+      analyser.getByteFrequencyData(freq);
+      analyser.getByteTimeDomainData(td);
+      var hz = ctx.sampleRate / analyser.fftSize;
+      var atk = Math.min(1, dt * 30), rel = dt * 1.4;
+      for (i = 0; i < 64; i++) {
+        var a = Math.floor(30 * Math.pow(400, i / 64) / hz);
+        var b = Math.max(a + 1, Math.ceil(30 * Math.pow(400, (i + 1) / 64) / hz));
+        var mx = 0;
+        for (var k = a; k < b && k < 1024; k++) if (freq[k] > mx) mx = freq[k];
+        var v = Math.min(1, Math.pow(mx / 255, 1.7) * (1 + 1.4 * i / 64));
+        spec[i] = v > spec[i] ? spec[i] + (v - spec[i]) * atk : Math.max(v, spec[i] - rel);
+      }
+      // waveform: lock to a rising zero crossing, then ease toward the new shape
+      var z = 0;
+      for (i = 1; i < 1000; i++) if (td[i - 1] < 128 && td[i] >= 128) { z = i; break; }
+      var wk = Math.min(1, dt * 18);
+      for (i = 0; i < 256; i++) { waveF[i] += (td[z + i * 4] - waveF[i]) * wk; waveTex[i] = waveF[i]; }
+      for (i = 0; i < 18; i++) rb += spec[i];
+      for (i = 18; i < 45; i++) rm += spec[i];
+      for (i = 45; i < 64; i++) rt += spec[i];
+      rb /= 18; rm /= 27; rt /= 19;
+      level = Math.max(rb, rm, rt);
+      // slow auto-gain so quiet sources (a mic across the room) still move things
+      var floor = (mode === 'mic' || mode === 'tab') ? 0.05 : 0.14, decay = 1 - dt * 0.06;
+      gB = Math.max(gB * decay, rb, floor);
+      gM = Math.max(gM * decay, rm, floor);
+      gT = Math.max(gT * decay, rt, floor);
+      rb /= gB; rm /= gM; rt /= gT;
+      for (i = 0; i < 64; i++) spec[i] = Math.min(1, spec[i]);
+    } else {
+      var ph = (t * 1.5) % 1, kick = Math.exp(-ph * 5);
+      for (i = 0; i < 64; i++) {
+        var sv = 0.26 + 0.22 * Math.sin(t * 1.3 + i * 0.35) + 0.18 * Math.sin(t * 2.9 - i * 0.11);
+        spec[i] = Math.max(0, Math.min(1, sv * (1 - i / 64 * 0.4) + (i < 10 ? kick * 0.4 : 0)));
+      }
+      for (i = 0; i < 256; i++) waveTex[i] = 128 + 46 * Math.sin(i * 0.11 + t * 2.0) * Math.sin(i * 0.021 + t * 0.7);
+      rb = 0.2 + 0.5 * kick; rm = 0.35 + 0.15 * Math.sin(t * 0.9); rt = 0.3 + 0.2 * Math.sin(t * 2.3);
+      level = 0;
+    }
+    bass += (rb - bass) * Math.min(1, dt * 12);
+    mid += (rm - mid) * Math.min(1, dt * 8);
+    treb += (rt - treb) * Math.min(1, dt * 10);
+    energy += ((rb * 0.6 + rm * 0.4) - energy) * Math.min(1, dt * 1.5);   // slow, for camera motion
+    bassAvg += (rb - bassAvg) * Math.min(1, dt * 1.2);
+    beatHit = false;
+    if (rb > bassAvg * 1.25 + 0.05 && t - lastBeat > 0.25) { beat = 1; lastBeat = t; beatHit = true; }
+    beat *= Math.exp(-dt * 5.5);
+    // beat envelope with a short attack instead of an instant jump: punches, never snaps
+    beatEnv += (beat - beatEnv) * Math.min(1, dt * (beat > beatEnv ? 22 : 8));
+    for (i = 0; i < 64; i++) specTex[i] = Math.round(spec[i] * 255);
+  }
+
+  /* ---------- Frame loop ---------- */
+  var tPrev = 0, time = 0, camZ = 0, vel = 2.6, sdt = 1 / 60, acc = 0, accN = 0, frozen = false, meterTick = 0;
+  var meterBar = $('meter').firstChild;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    var raw = tPrev ? (now - tPrev) / 1000 : 1 / 60;
+    tPrev = now;
+    var hitch = raw > 0.25;
+    if (hitch) raw = 1 / 60;
+    // smooth the frame time: uneven rAF timing was a big source of judder
+    sdt += (Math.min(raw, 0.1) - sdt) * 0.12;
+    var dt = sdt;
+
+    if (!hitch && document.visibilityState === 'visible') { acc += raw; accN++; }
+    if (accN >= 90) {
+      var avg = acc / accN; acc = 0; accN = 0;
+      var since = now - lastScaleChange;
+      if (avg > 0.022 && step > 0 && since > 1500) {
+        step--; downgrades++; lastScaleChange = now; resize();
+      } else if (avg < 0.0125 && step < STEPS.length - 1 && since > 4000 + 8000 * downgrades) {
+        step++; lastScaleChange = now; resize();
+      }
+    }
+    if (frozen) dt = 0;
+    time += dt;
+    analyse(dt, time);
+
+    sceneClock += dt;
+    if (blend < 1) {
+      blend = Math.min(1, blend + dt / 5);
+      var kb = blend * blend * (3 - 2 * blend);
+      for (var i = 0; i < P.length; i++) P[i] = Pfrom[i] + (Pto[i] - Pfrom[i]) * kb;
+    }
+    if ($('autoScenes').checked && !frozen && ((sceneClock > 26 && beatHit) || sceneClock > 36)) setScene(sceneIx + 1, false);
+
+    // camera speed follows the music's energy through an eased velocity, so beats
+    // add a gentle surge instead of jerking the view forward
+    var motion = calm ? 0.4 : 1;
+    var target = P[40] * motion * (1 + 1.0 * energy + (calm ? 0 : 0.35 * beatEnv));
+    vel += (target - vel) * Math.min(1, dt * 2.5);
+    camZ += vel * dt;
+    var aspect = canvas.width / canvas.height;
+    var focal = (aspect < 1 ? 1.05 : 1.45) * (1 - (calm ? 0 : 0.03 * beatEnv));
+
+    gl.uniform2f(U.uRes, canvas.width, canvas.height);
+    gl.uniform1f(U.uTime, time);
+    gl.uniform1f(U.uCamZ, camZ);
+    gl.uniform1f(U.uFocal, focal);
+    gl.uniform3f(U.uCam, 1.4 * Math.sin(time * 0.13 * motion), 1.9 + 0.5 * Math.sin(time * 0.21) + 0.2 * energy, 0.04 * Math.sin(time * 0.1) * motion);
+    gl.uniform2f(U.uLook, 0.18 * Math.sin(time * 0.11) + 0.05 * Math.sin(time * 0.37), 0.03 + 0.05 * Math.sin(time * 0.17));
+    gl.uniform4f(U.uAudio, bass, mid, treb, beatEnv);
+    gl.uniform3f(U.uSkyTop, P[0], P[1], P[2]);
+    gl.uniform3f(U.uSkyHor, P[3], P[4], P[5]);
+    gl.uniform3f(U.uSunCol, P[6], P[7], P[8]);
+    var az = P[9], el = P[10];
+    gl.uniform3f(U.uSun, Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+    gl.uniform3f(U.uTerA, P[11], P[12], P[13]);
+    gl.uniform3f(U.uTerB, P[14], P[15], P[16]);
+    gl.uniform3f(U.uWater, P[17], P[18], P[19]);
+    gl.uniform3f(U.uPilCol, P[20], P[21], P[22]);
+    gl.uniform3f(U.uSphTint, P[23], P[24], P[25]);
+    gl.uniform3f(U.uAur, P[26], P[27], P[28]);
+    gl.uniform4f(U.uA, P[29], P[30], P[31], P[32]);
+    gl.uniform4f(U.uB, P[33], P[34], P[35], P[36]);
+    gl.uniform4f(U.uC, P[37], P[38], P[39], calm ? 0 : 1);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, specTex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, waveTex);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    if (++meterTick % 4 === 0) meterBar.style.width = Math.round(Math.min(1, level * 1.6) * 100) + '%';
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- Controls ---------- */
+  $('micBtn').addEventListener('click', function () {
+    if (mode === 'mic') { stopAudio(); setStatus('Stopped listening.'); } else startMic();
+  });
+  $('tabBtn').addEventListener('click', function () {
+    if (mode === 'tab') { stopAudio(); setStatus('Stopped capturing.'); } else startCapture();
+  });
+  $('demoBtn').addEventListener('click', function () {
+    if (mode === 'demo') { stopAudio(); setStatus('Demo stopped.'); } else startDemo();
+  });
+  $('fileLabel').addEventListener('click', function () { ensureCtx(); });
+  $('fileInput').addEventListener('change', function () { loadFile(this.files && this.files[0]); this.value = ''; });
+  $('pauseBtn').addEventListener('click', function () {
+    if (!audioEl) return;
+    ensureCtx();
+    if (audioEl.paused) {
+      audioEl.play().then(function () { $('pauseBtn').textContent = 'Pause'; setStatus('Playing'); requestWake(); })
+        .catch(function () { setStatus('Playback was blocked. Press Play again.'); });
+    } else { audioEl.pause(); $('pauseBtn').textContent = 'Play'; setStatus('Paused'); }
+  });
+  $('nextBtn').addEventListener('click', function () { setScene(sceneIx + 1, false); });
+  var fsOK = !!(stage.requestFullscreen && document.fullscreenEnabled);
+  if (!fsOK) $('fullBtn').hidden = true;
+  function toggleFull() {
+    if (!fsOK) return;
+    try {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else stage.requestFullscreen().catch(function () {});
+    } catch (e) {}
+  }
+  $('fullBtn').addEventListener('click', toggleFull);
+  document.addEventListener('fullscreenchange', function () {
+    $('fullBtn').textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+    resize();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON')) return;
+    if (e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') setScene(sceneIx + 1, false);
+    else if (e.key === 'ArrowLeft') setScene(sceneIx - 1, false);
+    else if (e.key === 'f' || e.key === 'F') toggleFull();
+  });
+
+  var quietTimer = null;
+  function wake() {
+    document.body.classList.remove('quiet');
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(function () { quietTimer = null; if (live()) document.body.classList.add('quiet'); }, 5000);
+  }
+  ['pointerdown', 'pointermove', 'keydown', 'focusin'].forEach(function (ev) { window.addEventListener(ev, wake, { passive: true }); });
+  setInterval(function () { if (!document.body.classList.contains('quiet') && live() && !quietTimer) wake(); }, 2000);
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+
+  window.__viz = { setScene: setScene, freeze: function (v) { frozen = v; }, count: SCENES.length,
+    stats: function () { return { w: canvas.width, h: canvas.height, step: step, dt: sdt, mode: mode }; } };
+})();
+</script>
+</body>
+</html>
