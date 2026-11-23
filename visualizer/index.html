@@ -183,7 +183,7 @@ button[hidden], .filebtn[hidden] { display: none; }
 <script id="frag" type="x-shader/x-fragment">
 precision highp float;
 uniform vec2 uRes;
-uniform float uTime, uCamZ, uFocal;
+uniform float uTime, uCamZ, uFocal, uFit;   // uFit < 1 on very wide screens: sky elements sit lower and smaller
 uniform vec3 uCam;
 uniform vec2 uLook;
 uniform vec4 uAudio;            // bass, mid, treble, beat pulse
@@ -363,7 +363,7 @@ vec3 skyBase(vec3 rd) {
   float az = atan(rd.x, rd.z);
   float u = clamp(az / 2.4 + 0.5, 0.0, 1.0);
   float w = texture2D(uWave, vec2(u, 0.5)).r * 2.0 - 1.0;
-  float cy = 0.36 + 0.04 * sin(az * 3.0 + uTime * 0.3) + w * 0.2;
+  float cy = (0.36 + 0.04 * sin(az * 3.0 + uTime * 0.3) + w * 0.2) * uFit;
   float dy = rd.y - cy;
   float g = exp(-abs(dy) * 60.0) * 1.7 + step(0.0, dy) * exp(-dy * 7.0) * 0.28;
   vec3 rib = mix(uAur, prism(u * 1.3 + uTime * 0.05) * 1.3, uD.z);
@@ -378,7 +378,7 @@ vec3 sky(vec3 rd) {
   if (uLogoA.x > 0.5 && uLogoA.x < 1.5) {
     float laz = atan(rd.x, rd.z);
     float lel = asin(clamp(rd.y, -1.0, 1.0));
-    vec2 lc = vec2(laz, lel - 0.34) * uLogoB.w + uLogoB.xy * 0.5;
+    vec2 lc = vec2(laz, lel - 0.34 * uFit) * uLogoB.w + uLogoB.xy * 0.5;
     if (lc.x > 0.0 && lc.y > 0.0 && lc.x < uLogoB.x && lc.y < uLogoB.y) {
     vec2 bd;
     vec4 L = emblem(lc, bd) * (1.0 - uD.w);          // the glass head brings its own C
@@ -396,7 +396,7 @@ vec3 sky(vec3 rd) {
   // the glass head, standing over the valley; kicks split its color channels apart
   if (uD.w > 0.01) {
     float az = atan(rd.x, rd.z), hel = asin(clamp(rd.y, -1.0, 1.0));
-    vec2 hu = vec2(az / 0.68 + 0.5, 1.0 - (hel + 0.04) / 0.68);
+    vec2 hu = vec2(az / (0.68 * uFit) + 0.5, 1.0 - (hel + 0.04) / (0.68 * uFit));
     if (hu.x > 0.0 && hu.x < 1.0 && hu.y > 0.0 && hu.y < 1.0) {
       float sh = 0.002 + 0.012 * uAudio.w;
       vec3 hc = vec3(texture2D(uHead, hu + vec2(sh, 0.0)).r, texture2D(uHead, hu).g, texture2D(uHead, hu - vec2(sh, 0.0)).b);
@@ -809,7 +809,7 @@ void main() {
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 
   var U = {};
-  ['uRes', 'uTime', 'uCamZ', 'uFocal', 'uCam', 'uLook', 'uAudio', 'uSpec', 'uWave', 'uSkyTop', 'uSkyHor', 'uSunCol', 'uSun',
+  ['uRes', 'uTime', 'uCamZ', 'uFocal', 'uFit', 'uCam', 'uLook', 'uAudio', 'uSpec', 'uWave', 'uSkyTop', 'uSkyHor', 'uSunCol', 'uSun',
    'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC', 'uLogo', 'uLogoGlow', 'uLogoA', 'uLogoB', 'uLogoSdf', 'uHead', 'uGlass', 'uD'].forEach(function (n) {
     U[n] = gl.getUniformLocation(prog, n);
   });
@@ -1480,7 +1480,13 @@ void main() {
     gl.viewport(0, 0, rw, rh);
     gl.useProgram(prog);
     var aspect = rw / rh;
-    var focal = (aspect < 1 ? 1.05 : 1.45) * (1 - (calm ? 0 : 0.03 * beatEnv));
+    // Very wide screens (wider than about 2.3:1) would see over 116 degrees across and
+    // stretch everything near the edges. Past that, zoom in just enough to hold each side
+    // to 58 degrees (tan 58 = 1.6), and lower and shrink the sky elements to match.
+    var focal0 = Math.max(aspect < 1 ? 1.05 : 1.45, aspect / 1.6);
+    var fit = Math.min(1, Math.atan(1 / focal0) / Math.atan(1 / 1.45));
+    var focal = focal0 * (1 - (calm ? 0 : 0.03 * beatEnv));
+    gl.uniform1f(U.uFit, fit);
 
     gl.uniform2f(U.uRes, rw, rh);
     gl.uniform1f(U.uTime, time);
@@ -1515,7 +1521,7 @@ void main() {
     var split = 2 + (calm ? 0 : 6 * beatEnv);   // texels; the artwork's own split is one art pixel (2 texels)
     gl.uniform4f(U.uLogoA, lmode, calm ? 0 : glitch, split * (lmode === 1 ? 2 : 1), 0.85 + 0.5 * beatEnv);
     // sky: the emblem spans 0.42 radians (about 24 degrees) of the view, centered 0.34 above the horizon
-    gl.uniform4f(U.uLogoB, LW, LH, frontScale * (1 - (calm ? 0 : 0.035 * beatEnv)), logoInnerH / 0.42);
+    gl.uniform4f(U.uLogoB, LW, LH, frontScale * (1 - (calm ? 0 : 0.035 * beatEnv)), logoInnerH / (0.42 * fit));
 
     gl.activeTexture(gl.TEXTURE0);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, specTex);
