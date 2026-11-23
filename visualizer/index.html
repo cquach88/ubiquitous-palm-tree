@@ -120,6 +120,7 @@ button[hidden], .filebtn[hidden] { display: none; }
 #status { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
 .check { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.check input[type=range] { width: 110px; }
 #meter { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; }
 #meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
 #fail {
@@ -153,10 +154,12 @@ button[hidden], .filebtn[hidden] { display: none; }
     <div id="meter" aria-hidden="true"><i></i></div>
     <div class="row small">
       <button id="nextBtn" type="button">Next scene</button>
+      <button id="qualBtn" type="button">Quality: Auto</button>
       <button id="fullBtn" type="button">Full screen</button>
     </div>
     <div class="meta">
       <span id="status" role="status" aria-live="polite">Pick a music source. The mic works on any phone or computer.</span>
+      <label class="check" for="sensRange">Sensitivity <input id="sensRange" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
       <label class="check" for="autoScenes"><input id="autoScenes" type="checkbox" checked> Change scenes automatically</label>
     </div>
   </div>
@@ -568,16 +571,23 @@ void main() {
   gl.uniform1i(U.uSpec, 0); gl.uniform1i(U.uWave, 1);
 
   /* ---------- Render resolution ----------
-     The old version re-scaled every 40 frames in both directions, so the picture kept
-     popping between sharp and soft. Now: a few fixed quality steps, a long measuring
-     window, and a cooldown, so the resolution settles and stays put. */
-  var STEPS = [60000, 90000, 130000, 180000, 250000, 340000, 460000, 620000, 820000];
-  var step = touch ? 3 : 5;
-  var lastScaleChange = 0, downgrades = 0;
+     Quality steps are pixel budgets. In Auto, the page probes upward one step at a
+     time while frames keep pace with the display (capped at 60 fps as the target, so a
+     120 Hz screen does not sacrifice sharpness for frame rate), and steps down when
+     they do not. A step that failed becomes the ceiling for a while, so it settles. */
+  var STEPS = [60000, 90000, 130000, 180000, 250000, 340000, 460000, 620000, 820000,
+               1100000, 1450000, 1900000, 2500000, 3300000, 4300000];
+  var QUALITIES = ['auto', 'sharp', 'fast'];
+  var QLABEL = { auto: 'Quality: Auto', sharp: 'Quality: Sharp', fast: 'Quality: Fast' };
+  var quality = 'auto';
+  try { var qs = localStorage.getItem('mirrorsea.quality'); if (QUALITIES.indexOf(qs) >= 0) quality = qs; } catch (e) {}
+  var step = touch ? 6 : 8, ceiling = STEPS.length - 1, atNative = false;
   function resize() {
     var w = stage.clientWidth || 320, h = stage.clientHeight || 480;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var scale = Math.min(dpr, Math.sqrt(STEPS[step] / (w * h)));
+    var budget = quality === 'sharp' ? Infinity : quality === 'fast' ? STEPS[4] : STEPS[step];
+    var scale = Math.min(dpr, Math.sqrt(budget / (w * h)));
+    atNative = scale >= dpr - 1e-3;
     var cw = Math.max(48, Math.round(w * scale)), ch = Math.max(48, Math.round(h * scale));
     if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
     gl.viewport(0, 0, cw, ch);
@@ -585,15 +595,53 @@ void main() {
   window.addEventListener('resize', resize);
   resize();
 
+  var ft = [], baseFrame = 1 / 30, lastChange = 0, lastUp = -1e9;
+  function nativePx() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    return (stage.clientWidth || 320) * (stage.clientHeight || 480) * dpr * dpr;
+  }
+  function governor(raw, now) {
+    ft.push(raw);
+    var total = 0;
+    for (var i = 0; i < ft.length; i++) total += ft[i];
+    // judge after 60 frames, or sooner when frames are slow (at most ~1.5 s, at least 6 frames)
+    if (ft.length < 60 && !(total > 1.5 && ft.length >= 6)) return;
+    var srt = ft.slice().sort(function (x, y) { return x - y; }), med = srt[srt.length >> 1], slow = 0;
+    for (i = 0; i < ft.length; i++) if (ft[i] > Math.max(med, 1 / 60) * 1.6) slow++;
+    var n = ft.length;
+    ft = [];
+    // the display's refresh interval: the fastest pace seen, never slower than 30 Hz
+    baseFrame = Math.max(1 / 144, Math.min(baseFrame, med, 1 / 30));
+    var ok = med <= Math.max(baseFrame * 1.15, 1 / 55) && slow < n / 12;
+    if (quality !== 'auto' || now - lastChange < 1200) return;
+    if (!ok && step > 0) {
+      if (now - lastUp < 8000) ceiling = step - 1;                      // the probe failed: stop there
+      // steps above native resolution look identical, so skip straight past them
+      var top = 0, np = nativePx();
+      while (top < STEPS.length - 1 && STEPS[top + 1] < np * 0.9) top++;
+      step = Math.min(step - 1, top);
+      lastChange = now; resize();
+    } else if (ok && step < ceiling && !atNative && now - lastChange > 2500) {
+      step++; lastUp = lastChange = now; resize();
+    } else if (ok && step === ceiling && ceiling < STEPS.length - 1 && now - lastChange > 45000) {
+      ceiling++;                                                         // conditions may have improved
+    }
+  }
+
   /* ---------- Audio ----------
      analyser is a silent tap. Sources you should hear (demo, a loaded song) are also
      routed to the speakers; captured sources (mic, computer audio) are not, so there
      is no echo or feedback. */
   var ctx = null, analyser = null, audioEl = null, elSrc = null, objUrl = null, demo = null, mode = 'idle';
   var stream = null, streamSrc = null, streamGain = null;
-  var freq = new Uint8Array(1024), td = new Uint8Array(2048), spec = new Float32Array(64);
-  var bass = 0, mid = 0, treb = 0, beat = 0, beatEnv = 0, energy = 0, bassAvg = 0.3, lastBeat = 0;
-  var gB = 0.3, gM = 0.3, gT = 0.3, beatHit = false, level = 0;
+  var fdb = new Float32Array(1024), td = new Uint8Array(2048), spec = new Float32Array(64);
+  var bandDb = new Float32Array(64), prevDb = new Float32Array(64), lo = new Float32Array(64), hi = new Float32Array(64);
+  var bass = 0, mid = 0, treb = 0, beat = 0, beatEnv = 0, energy = 0, lastBeat = 0;
+  var groove = 0, fluxHist = new Float32Array(45), fluxPos = 0, fluxPrev = 0, beatHit = false, level = 0, sens = 1;
+  function resetLevels() {
+    for (var i = 0; i < 64; i++) { lo[i] = -70; hi[i] = -40; prevDb[i] = -100; }
+    fluxHist.fill(0); fluxPrev = 0; trackReset();
+  }
 
   function ensureCtx() {
     if (!ctx) {
@@ -602,8 +650,9 @@ void main() {
       ctx = new AC();
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.78;
-      analyser.minDecibels = -90; analyser.maxDecibels = -18;
+      // light smoothing keeps kick transients; the per-band envelopes below do the rest
+      analyser.smoothingTimeConstant = 0.3;
+      analyser.minDecibels = -100; analyser.maxDecibels = 0;
     }
     if (ctx.state === 'suspended') { ctx.resume().catch(function () {}); }
     return true;
@@ -724,7 +773,7 @@ void main() {
     streamGain = ctx.createGain();
     streamGain.gain.value = boost;
     streamSrc.connect(streamGain); streamGain.connect(analyser);   // not to the speakers
-    gB = gM = gT = 0.1;   // let auto-gain re-learn the new source's loudness
+    resetLevels();   // re-learn the new source's loudness
     mode = kind;
     s.getAudioTracks().forEach(function (t) {
       t.onended = function () { if (mode === kind) { stopAudio(); setStatus('Audio source ended. Pick another one.'); } };
@@ -805,7 +854,7 @@ void main() {
     objUrl = URL.createObjectURL(f);
     audioEl.src = objUrl;
     mode = 'file';
-    gB = gM = gT = 0.3;
+    resetLevels();
     refreshButtons();
     var name = f.name || 'your song';
     audioEl.play().then(function () {
@@ -834,23 +883,129 @@ void main() {
     }
   });
 
-  /* ---------- Analysis ---------- */
-  function analyse(dt, t) {
+  /* ---------- Beat tracking ----------
+     Onset strength is written into a 6 second grid at 100 Hz. Every half second the
+     grid's autocorrelation picks the tempo (70 to 180 BPM, gently favoring ~120), and
+     a phase search finds where the beats fall. Confidence decides whether to lock. */
+  var GR = 100, GL = 600;
+  var bt = { grid: new Float32Array(GL), lin: new Float32Array(GL), sm: new Float32Array(GL), head: 0, gt: 0,
+             start: 0, P: 0.5, last: 0, conf: 0, locked: false, nextEval: 0, fired: -9 };
+  function trackReset() {
+    bt.grid.fill(0); bt.gt = 0; bt.start = performance.now() / 1000; bt.locked = false; bt.conf = 0;
+    bt.nextEval = 0; bt.fired = -9;
+  }
+  function trackPush(T, o) {
+    if (!bt.gt || T - bt.gt > 1) bt.gt = T;
+    var k = 0;
+    while (bt.gt < T) { bt.head = (bt.head + 1) % GL; bt.grid[bt.head] = 0; bt.gt += 1 / GR; k++; }
+    k = Math.max(1, k);
+    // the onset happened somewhere since the last frame: spread it over that span
+    for (var j = 0; j < k; j++) { var c = (bt.head - j + GL) % GL; if (o / k > bt.grid[c]) bt.grid[c] = o / k; }
+  }
+  function trackEvaluate() {
+    var o = bt.lin, sm = bt.sm, i, j, mean = 0;
+    for (i = 0; i < GL; i++) o[i] = bt.grid[(bt.head + 1 + i) % GL];      // oldest to newest
+    for (i = 0; i < GL; i++) {
+      var acc = 0;
+      for (j = -2; j <= 2; j++) { var q = Math.min(GL - 1, Math.max(0, i + j)); acc += o[q] * (3 - Math.abs(j)); }
+      sm[i] = acc / 9; mean += sm[i];
+    }
+    mean /= GL;
+    var e0 = 1e-9;
+    for (i = 0; i < GL; i++) { sm[i] = Math.max(0, sm[i] - mean); e0 += sm[i] * sm[i]; }
+    function ac(l) { var r = 0; for (var n = l; n < GL; n++) r += sm[n] * sm[n - l]; return r / e0; }
+    var best = 0, lag = 50, lo = Math.floor(GR * 60 / 180), hiL = Math.ceil(GR * 60 / 70);
+    for (var l = lo; l <= hiL; l++) {
+      var bpm = 60 * GR / l, wgt = Math.exp(-0.5 * Math.pow(Math.log(bpm / 120) / Math.LN2 / 0.9, 2));
+      var sc = (ac(l) + (2 * l < GL ? 0.5 * ac(2 * l) : 0)) * wgt;
+      if (sc > best) { best = sc; lag = l; }
+    }
+    var a1 = ac(lag - 1), b1 = ac(lag), c1 = ac(lag + 1), den = a1 - 2 * b1 + c1;
+    var fl = lag + (den < 0 ? 0.5 * (a1 - c1) / den : 0);
+    var bestV = -1, bestPh = 0;
+    for (var h = 0; h < Math.floor(fl) * 2; h++) {
+      var ph = h / 2, v = 0;
+      for (var m = 0; ; m++) {
+        var idx = Math.round(GL - 1 - ph - m * fl);
+        if (idx < 1) break;
+        v += sm[idx] + 0.5 * (sm[idx - 1] + sm[Math.min(GL - 1, idx + 1)]);
+      }
+      if (v > bestV) { bestV = v; bestPh = ph; }
+    }
+    bt.conf = best;
+    bt.P = fl / GR;
+    bt.last = bt.gt - bestPh / GR;
+    // hysteresis: steady music locks above 0.62 and stays locked down to 0.52;
+    // beatless music measured around 0.45 in testing
+    var s = Math.sqrt(sens);
+    bt.locked = bt.locked ? best > 0.52 / s : best > 0.62 / s;
+  }
+  resetLevels();
+  function fireBeat(t, strength) { beat = Math.max(beat, strength); lastBeat = t; beatHit = true; }
+
+  /* ---------- Analysis ----------
+     Mastered tracks are loud and compressed: the spectrum barely moves in absolute
+     terms. So each of the 64 bands tracks its own recent loudest and quietest level
+     (in dB, a few seconds of memory) and is drawn relative to that window. A kick that
+     lifts the low bands by only 3 to 6 dB still swings those pillars through most of
+     their height. Sensitivity narrows or widens the smallest window allowed. Kicks are
+     found by spectral flux (sudden rises across the low bands) against an adaptive
+     threshold, which works on compressed music where plain loudness barely changes. */
+  function analyse(dt, t, T) {
     var i, rb = 0, rm = 0, rt = 0;
+    beatHit = false;
     if (live()) {
-      analyser.getByteFrequencyData(freq);
+      analyser.getFloatFrequencyData(fdb);
       analyser.getByteTimeDomainData(td);
       var hz = ctx.sampleRate / analyser.fftSize;
-      var atk = Math.min(1, dt * 30), rel = dt * 1.4;
+      var minRange = 10 / sens, drift = dt * 6, atk = Math.min(1, dt * 40), rel = dt * 3.2;
+      var flux = 0, loudest = -120;
       for (i = 0; i < 64; i++) {
         var a = Math.floor(30 * Math.pow(400, i / 64) / hz);
         var b = Math.max(a + 1, Math.ceil(30 * Math.pow(400, (i + 1) / 64) / hz));
-        var mx = 0;
-        for (var k = a; k < b && k < 1024; k++) if (freq[k] > mx) mx = freq[k];
-        var v = Math.min(1, Math.pow(mx / 255, 1.7) * (1 + 1.4 * i / 64));
+        var d = -120;
+        for (var k = a; k < b && k < 1024; k++) if (fdb[k] > d) d = fdb[k];
+        if (!(d > -120)) d = -120;
+        d += i * 0.12;                       // gentle tilt: music has less energy up high
+        bandDb[i] = d;
+        if (d > loudest) loudest = d;
+        hi[i] = d > hi[i] ? d : hi[i] - drift;
+        lo[i] = d < lo[i] ? d : lo[i] + drift;
+        if (hi[i] - lo[i] < 1) lo[i] = hi[i] - 1;
+        var range = Math.max(hi[i] - lo[i], minRange);
+        var v = Math.max(0, Math.min(1, (d - (hi[i] - range)) / range));
+        v = Math.pow(v, 1.5) * smoothstep(-92, -64, hi[i]);     // silent bands stay flat
         spec[i] = v > spec[i] ? spec[i] + (v - spec[i]) * atk : Math.max(v, spec[i] - rel);
+        flux += Math.max(0, d - prevDb[i]) * (i < 16 ? 1 : 0.25);
+        prevDb[i] = d;
       }
-      // waveform: lock to a rising zero crossing, then ease toward the new shape
+      level = Math.max(0, Math.min(1, (loudest + 85) / 60));
+
+      // onsets: a peak in spectral flux that stands clear of the recent median
+      // (the median ignores the kicks themselves, so loud kicks do not raise the bar)
+      fluxHist[fluxPos] = flux; fluxPos = (fluxPos + 1) % fluxHist.length;
+      var srt = Array.prototype.slice.call(fluxHist).sort(function (x, y) { return x - y; });
+      var med = srt[srt.length >> 1], q75 = srt[Math.floor(srt.length * 0.75)];
+      var thr = med + (1.5 / sens) * Math.max(q75 - med, 1.5) + 3;
+      var onset = fluxPrev > thr && fluxPrev >= flux, fluxPrevPeak = fluxPrev;
+      fluxPrev = flux;
+      trackPush(T, flux);
+      if (T >= bt.nextEval && T - bt.start > 2.5) { trackEvaluate(); bt.nextEval = T + 0.5; }
+
+      if (bt.locked) {
+        // Locked to the tempo: pulse on the beat grid. A real onset just before a grid
+        // beat fires it early (true kick timing); otherwise the grid fires on time, so
+        // kicks buried in a dense mix still land.
+        var nextG = bt.last + Math.ceil((T - bt.last) / bt.P - 1e-6) * bt.P, prevG = nextG - bt.P;
+        if (onset && nextG - T < 0.09 && Math.abs(nextG - bt.fired) > bt.P * 0.5) {
+          bt.fired = nextG; fireBeat(t, 1);
+        } else if (T - prevG < 0.12 && Math.abs(prevG - bt.fired) > bt.P * 0.5) {
+          bt.fired = prevG; fireBeat(t, 0.9);
+        }
+      } else if (onset && fluxPrevPeak > thr * 1.4 && t - lastBeat > 0.35) {
+        fireBeat(t, 0.45);                                // no steady tempo: only strong accents, gently
+      }
+
       var z = 0;
       for (i = 1; i < 1000; i++) if (td[i - 1] < 128 && td[i] >= 128) { z = i; break; }
       var wk = Math.min(1, dt * 18);
@@ -859,14 +1014,6 @@ void main() {
       for (i = 18; i < 45; i++) rm += spec[i];
       for (i = 45; i < 64; i++) rt += spec[i];
       rb /= 18; rm /= 27; rt /= 19;
-      level = Math.max(rb, rm, rt);
-      // slow auto-gain so quiet sources (a mic across the room) still move things
-      var floor = (mode === 'mic' || mode === 'tab') ? 0.05 : 0.14, decay = 1 - dt * 0.06;
-      gB = Math.max(gB * decay, rb, floor);
-      gM = Math.max(gM * decay, rm, floor);
-      gT = Math.max(gT * decay, rt, floor);
-      rb /= gB; rm /= gM; rt /= gT;
-      for (i = 0; i < 64; i++) spec[i] = Math.min(1, spec[i]);
     } else {
       var ph = (t * 1.5) % 1, kick = Math.exp(-ph * 5);
       for (i = 0; i < 64; i++) {
@@ -875,47 +1022,45 @@ void main() {
       }
       for (i = 0; i < 256; i++) waveTex[i] = 128 + 46 * Math.sin(i * 0.11 + t * 2.0) * Math.sin(i * 0.021 + t * 0.7);
       rb = 0.2 + 0.5 * kick; rm = 0.35 + 0.15 * Math.sin(t * 0.9); rt = 0.3 + 0.2 * Math.sin(t * 2.3);
+      if (ph < dt * 1.5 && t - lastBeat > 0.3) { beat = 0.7; lastBeat = t; beatHit = true; }
       level = 0;
     }
-    bass += (rb - bass) * Math.min(1, dt * 12);
-    mid += (rm - mid) * Math.min(1, dt * 8);
-    treb += (rt - treb) * Math.min(1, dt * 10);
+    bass += (rb - bass) * Math.min(1, dt * 14);
+    mid += (rm - mid) * Math.min(1, dt * 9);
+    treb += (rt - treb) * Math.min(1, dt * 12);
     energy += ((rb * 0.6 + rm * 0.4) - energy) * Math.min(1, dt * 1.5);   // slow, for camera motion
-    bassAvg += (rb - bassAvg) * Math.min(1, dt * 1.2);
-    beatHit = false;
-    if (rb > bassAvg * 1.25 + 0.05 && t - lastBeat > 0.25) { beat = 1; lastBeat = t; beatHit = true; }
-    beat *= Math.exp(-dt * 5.5);
-    // beat envelope with a short attack instead of an instant jump: punches, never snaps
-    beatEnv += (beat - beatEnv) * Math.min(1, dt * (beat > beatEnv ? 22 : 8));
-    for (i = 0; i < 64; i++) specTex[i] = Math.round(spec[i] * 255);
+    beat *= Math.exp(-dt * 9);
+    beatEnv += (beat - beatEnv) * Math.min(1, dt * (beat > beatEnv ? 30 : 9));
+    // pillars: the spectrum plus a kick pump that is strongest on the near (bass) pillars
+    // While a steady beat is present, the low pillars duck between kicks and slam back
+    // up on each one (sidechain style), so the kick reads clearly even when sustained
+    // bass keeps those bands loud the whole time.
+    groove += (((live() ? bt.locked : true) ? 1 : 0) - groove) * Math.min(1, dt * 2);
+    for (i = 0; i < 64; i++) {
+      var w = Math.max(0, 1 - i / 30) * groove;
+      var pv = spec[i] * (1 - 0.7 * w * (1 - beatEnv)) + beatEnv * 0.3 * w;
+      specTex[i] = Math.round(Math.min(1, pv) * 255);
+    }
   }
+  function smoothstep(e0, e1, x) { var u = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return u * u * (3 - 2 * u); }
 
   /* ---------- Frame loop ---------- */
-  var tPrev = 0, time = 0, camZ = 0, vel = 2.6, sdt = 1 / 60, acc = 0, accN = 0, frozen = false, meterTick = 0;
+  var tPrev = 0, time = 0, camZ = 0, vel = 2.6, sdt = 1 / 60, frozen = false, meterTick = 0;
   var meterBar = $('meter').firstChild;
   function frame(now) {
     requestAnimationFrame(frame);
     var raw = tPrev ? (now - tPrev) / 1000 : 1 / 60;
     tPrev = now;
-    var hitch = raw > 0.25;
+    var hitch = raw > 1;             // tab was hidden or the device slept: not a speed sample
     if (hitch) raw = 1 / 60;
     // smooth the frame time: uneven rAF timing was a big source of judder
     sdt += (Math.min(raw, 0.1) - sdt) * 0.12;
     var dt = sdt;
 
-    if (!hitch && document.visibilityState === 'visible') { acc += raw; accN++; }
-    if (accN >= 90) {
-      var avg = acc / accN; acc = 0; accN = 0;
-      var since = now - lastScaleChange;
-      if (avg > 0.022 && step > 0 && since > 1500) {
-        step--; downgrades++; lastScaleChange = now; resize();
-      } else if (avg < 0.0125 && step < STEPS.length - 1 && since > 4000 + 8000 * downgrades) {
-        step++; lastScaleChange = now; resize();
-      }
-    }
+    if (!hitch && document.visibilityState === 'visible') governor(raw, now);
     if (frozen) dt = 0;
     time += dt;
-    analyse(dt, time);
+    analyse(dt, time, now / 1000);
 
     sceneClock += dt;
     if (blend < 1) {
@@ -986,6 +1131,23 @@ void main() {
         .catch(function () { setStatus('Playback was blocked. Press Play again.'); });
     } else { audioEl.pause(); $('pauseBtn').textContent = 'Play'; setStatus('Paused'); }
   });
+  function showQuality() { $('qualBtn').textContent = QLABEL[quality]; }
+  showQuality();
+  $('qualBtn').addEventListener('click', function () {
+    quality = QUALITIES[(QUALITIES.indexOf(quality) + 1) % QUALITIES.length];
+    try { localStorage.setItem('mirrorsea.quality', quality); } catch (e) {}
+    if (quality === 'auto') { ceiling = STEPS.length - 1; ft = []; lastChange = performance.now(); }
+    showQuality(); resize();
+    setStatus(quality === 'sharp' ? 'Sharp: full screen resolution, even if frames drop.' :
+              quality === 'fast' ? 'Fast: low resolution for slower devices.' :
+              'Auto: as sharp as this device can keep smooth.');
+  });
+  try { var sv0 = parseFloat(localStorage.getItem('mirrorsea.sens')); if (sv0 >= 0.5 && sv0 <= 2.5) sens = sv0; } catch (e) {}
+  $('sensRange').value = sens;
+  $('sensRange').addEventListener('input', function () {
+    sens = parseFloat(this.value) || 1;
+    try { localStorage.setItem('mirrorsea.sens', String(sens)); } catch (e) {}
+  });
   $('nextBtn').addEventListener('click', function () { setScene(sceneIx + 1, false); });
   var fsOK = !!(stage.requestFullscreen && document.fullscreenEnabled);
   if (!fsOK) $('fullBtn').hidden = true;
@@ -1021,8 +1183,8 @@ void main() {
     navigator.serviceWorker.register('sw.js').catch(function () {});
   }
 
-  window.__viz = { setScene: setScene, freeze: function (v) { frozen = v; }, count: SCENES.length,
-    stats: function () { return { w: canvas.width, h: canvas.height, step: step, dt: sdt, mode: mode }; } };
+  window.__viz = { setScene: setScene, freeze: function (v) { frozen = v; }, count: SCENES.length, spec: function () { return Array.from(specTex); },
+    stats: function () { return { w: canvas.width, h: canvas.height, step: step, ceiling: ceiling, dt: sdt, mode: mode, beatT: lastBeat, bpm: Math.round(60 / bt.P * 10) / 10, conf: Math.round(bt.conf * 100) / 100, locked: bt.locked, at: audioEl ? audioEl.currentTime : 0 }; } };
 })();
 </script>
 </body>
