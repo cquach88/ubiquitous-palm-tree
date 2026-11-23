@@ -53,6 +53,8 @@ body.quiet .strip { -webkit-backdrop-filter: none; backdrop-filter: none; }
   white-space: pre-wrap; overflow-wrap: anywhere; display: none; z-index: 2;
 }
 #info.on { display: block; }
+#info { user-select: text; -webkit-user-select: text; }
+#infoCopy { float: right; min-height: 30px; padding: 0 10px; margin: 0 0 6px 10px; font: 500 12px var(--font-body); flex: none; }
 #hydraView { position: absolute; inset: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 1; }
 .plate, .strip { z-index: 2; }
 #info { z-index: 3; }
@@ -170,7 +172,7 @@ button[hidden], .filebtn[hidden] { display: none; }
   #seek { order: 10; flex: 1 1 100%; }
 }
 #meter { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; }
-#meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
+#meter i { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left center; transform: scaleX(0); transition: transform 0.08s linear; }
 #fail {
   position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
   padding: 24px; text-align: center; color: var(--ink); background: #05070d;
@@ -237,7 +239,7 @@ button[hidden], .filebtn[hidden] { display: none; }
 Ctrl+Enter runs. Keys 1 to 9 pick a preset; 0 or Esc turns Hydra off; ` shows or hides this panel.
 <a href="https://hydra.ojack.xyz" target="_blank" rel="noopener">Hydra</a> by Olivia Jack and contributors, AGPL-3.0 (<a href="vendor/hydra/LICENSE" target="_blank">license</a>). Visualizer source: <a href="https://github.com/cquach88/ubiquitous-palm-tree/tree/claude/inspiring-ritchie-6txz4w/visualizer" target="_blank" rel="noopener">GitHub</a>.</div>
   </div>
-  <div id="info" aria-live="off"></div>
+  <div id="info" aria-live="off"><button id="infoCopy" type="button">Copy</button><div id="infoText"></div></div>
   <div id="fail"><p id="failText"></p></div>
 </div>
 
@@ -1163,7 +1165,41 @@ void main() {
   });
   resize();
 
-  var ft = [], baseFrame = 1 / 30, lastChange = 0, lastUp = -1e9, perf = { fps: 0 };
+  var ft = [], baseFrame = 1 / 30, lastChange = 0, lastUp = -1e9, perf = { fps: 0, gpu: 0, budget: 0 };
+
+  /* GPU timing: Chrome and Edge on desktop can report how long the graphics card spends on
+     each frame. With that, quality aims for about 75% load, leaving room for spikes, and
+     predicts whether a sharper step fits before trying it, instead of finding out by
+     stuttering. Browsers without it fall back to judging by frame times. */
+  var tq = null, tqPool = [], tqPending = [], gpuSamples = [];
+  try { tq = gl.getExtension('EXT_disjoint_timer_query'); } catch (e) { tq = null; }
+  function gpuBegin() {
+    if (!tq || tqPending.length > 6) return null;
+    var q = tqPool.pop() || tq.createQueryEXT();
+    tq.beginQueryEXT(tq.TIME_ELAPSED_EXT, q);
+    return q;
+  }
+  function gpuEnd(q) { if (q) { tq.endQueryEXT(tq.TIME_ELAPSED_EXT); tqPending.push(q); } }
+  function gpuPoll() {
+    if (!tq) return;
+    var disjoint = gl.getParameter(tq.GPU_DISJOINT_EXT);
+    while (tqPending.length) {
+      var q = tqPending[0];
+      if (!tq.getQueryObjectEXT(q, tq.QUERY_RESULT_AVAILABLE_EXT)) break;
+      tqPending.shift();
+      var ns = tq.getQueryObjectEXT(q, tq.QUERY_RESULT_EXT);
+      if (!disjoint && ns > 0) gpuSamples.push(ns / 1e6);
+      tqPool.push(q);
+    }
+    if (gpuSamples.length > 240) gpuSamples.splice(0, gpuSamples.length - 240);
+  }
+  function gpuMedian() {
+    if (gpuSamples.length < 10) return 0;
+    var a = gpuSamples.slice().sort(function (x, y) { return x - y; });
+    gpuSamples.length = 0;
+    return a[a.length >> 1];
+  }
+  var stutterTimes = [];
   function nativePx() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     return (stage.clientWidth || 320) * (stage.clientHeight || 480) * dpr * dpr;
@@ -1183,7 +1219,17 @@ void main() {
     var target = Math.max(baseFrame * 1.15, quality === 'sharp' ? 1 / 40 : 1 / 55);
     // stutter counts: more than 1 slow frame in 30 is not ok; stepping up needs none at all
     var ok = med <= target && slow <= n / 30;
+    var canUp = ok && slow === 0;
     perf.fps = 1 / med;
+    var g = gpuMedian();
+    if (g > 0) {
+      // budget for our drawing: 60 fps (40 in Sharp), less a share for Hydra when it is on
+      var budget = 1000 * (quality === 'sharp' ? 1 / 40 : 1 / 60) * (hydraOn ? 0.8 : 1);
+      var ratio = step < STEPS.length - 1 ? STEPS[step + 1] / STEPS[step] : 2;
+      perf.gpu = g; perf.budget = budget * 0.8;
+      ok = ok && g <= budget * 0.82;
+      canUp = canUp && g * ratio <= budget * 0.7;   // only step up when the next step will fit
+    }
     if (quality === 'fast' || now - lastChange < 1200) return;
     if (!ok && step > 0) {
       if (now - lastUp < 8000) ceiling = step - 1;                      // the probe failed: stop there
@@ -1192,7 +1238,7 @@ void main() {
       while (top < STEPS.length - 1 && STEPS[top + 1] < np * 0.9) top++;
       step = Math.max(0, Math.min(step - (med > target * 3 ? 3 : 1), top));   // far too slow: drop faster
       lastChange = now; resize();
-    } else if (ok && slow === 0 && step < ceiling && !atNative && now - lastChange > 2500) {
+    } else if (canUp && step < ceiling && !atNative && now - lastChange > 2500) {
       step++; lastUp = lastChange = now; resize();
     }
   }
@@ -1206,7 +1252,7 @@ void main() {
   var fdb = new Float32Array(1024), td = new Uint8Array(2048), spec = new Float32Array(64);
   var bandDb = new Float32Array(64), prevDb = new Float32Array(64), lo = new Float32Array(64), hi = new Float32Array(64);
   var bass = 0, mid = 0, treb = 0, beat = 0, beatEnv = 0, energy = 0, lastBeat = 0;
-  var groove = 0, fluxHist = new Float32Array(45), fluxPos = 0, fluxPrev = 0, beatHit = false, level = 0, sens = 1;
+  var groove = 0, fluxSorted = new Float32Array(45), fluxHist = new Float32Array(45), fluxPos = 0, fluxPrev = 0, beatHit = false, level = 0, sens = 1;
   function resetLevels() {
     for (var i = 0; i < 64; i++) { lo[i] = -70; hi[i] = -40; prevDb[i] = -100; }
     fluxHist.fill(0); fluxPrev = 0; trackReset();
@@ -1560,7 +1606,8 @@ void main() {
       // onsets: a peak in spectral flux that stands clear of the recent median
       // (the median ignores the kicks themselves, so loud kicks do not raise the bar)
       fluxHist[fluxPos] = flux; fluxPos = (fluxPos + 1) % fluxHist.length;
-      var srt = Array.prototype.slice.call(fluxHist).sort(function (x, y) { return x - y; });
+      fluxSorted.set(fluxHist); fluxSorted.sort();     // typed arrays sort numerically, no allocation
+      var srt = fluxSorted;
       var med = srt[srt.length >> 1], q75 = srt[Math.floor(srt.length * 0.75)];
       var thr = med + (1.5 / sens) * Math.max(q75 - med, 1.5) + 3;
       var onset = fluxPrev > thr && fluxPrev >= flux, fluxPrevPeak = fluxPrev;
@@ -1621,7 +1668,7 @@ void main() {
   function smoothstep(e0, e1, x) { var u = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return u * u * (3 - 2 * u); }
 
   /* ---------- Frame loop ---------- */
-  var skipFrame = false;
+  var skipFrame = false, autoChk = $('autoScenes');
   document.addEventListener('visibilitychange', function () { skipFrame = true; });
   var tPrev = 0, time = 0, camZ = 0, vel = 2.6, sdt = 1 / 60, frozen = false, meterTick = 0;
   var meterBar = $('meter').firstChild;
@@ -1638,7 +1685,11 @@ void main() {
     sdt += (Math.min(raw, 0.1) - sdt) * 0.12;
     var dt = sdt;
 
-    if (!hitch && document.visibilityState === 'visible') governor(raw, now);
+    if (!hitch && document.visibilityState === 'visible') {
+      governor(raw, now);
+      if (raw > Math.max(baseFrame, 1 / 60) * 1.6) stutterTimes.push(now);
+    }
+    while (stutterTimes.length && now - stutterTimes[0] > 60000) stutterTimes.shift();
     if (frozen) dt = 0;
     time += dt;
     analyse(dt, time, now / 1000);
@@ -1649,7 +1700,7 @@ void main() {
       var kb = blend * blend * (3 - 2 * blend);
       for (var i = 0; i < P.length; i++) P[i] = Pfrom[i] + (Pto[i] - Pfrom[i]) * kb;
     }
-    if ($('autoScenes').checked && !frozen && ((sceneClock > 26 && beatHit) || sceneClock > 36)) setScene(sceneIx + 1, false);
+    if (autoChk.checked && !frozen && ((sceneClock > 26 && beatHit) || sceneClock > 36)) setScene(sceneIx + 1, false);
 
     // camera speed follows the music's energy through an eased velocity, so beats
     // add a gentle surge instead of jerking the view forward
@@ -1657,6 +1708,8 @@ void main() {
     var target = P[40] * motion * (1 + 1.0 * energy + (calm ? 0 : 0.35 * beatEnv));
     vel += (target - vel) * Math.min(1, dt * 2.5);
     camZ += vel * dt;
+    gpuPoll();
+    var gq = gpuBegin();
     if (useFbo) gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.viewport(0, 0, rw, rh);
     gl.useProgram(prog);
@@ -1734,9 +1787,11 @@ void main() {
       gl.uniform1f(PU.uAmt, up > 1.05 ? Math.min(1, 0.35 + (up - 1) * 0.8) : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+    gpuEnd(gq);
     hydraFrame(now, raw);
 
-    if (++meterTick % 4 === 0) meterBar.style.width = Math.round(Math.min(1, level * 1.6) * 100) + '%';
+    // scaleX, not width: moving the bar this way never makes the page re-lay itself out
+    if (++meterTick % 4 === 0) meterBar.style.transform = 'scaleX(' + Math.min(1, level * 1.6).toFixed(2) + ')';
   }
   requestAnimationFrame(frame);
 
@@ -1994,18 +2049,39 @@ void main() {
     var sw = Math.round(stage.clientWidth * dpr), sh = Math.round(stage.clientHeight * dpr);
     var pct = Math.round(100 * rw * rh / Math.max(1, sw * sh));
     var adv = gpuAdvice();
+    var ua = navigator.userAgent, br = (ua.match(/(Edg|OPR|Firefox|Chrome|Version)\/[\d.]+/) || [''])[0].replace('Edg/', 'Edge ').replace('OPR/', 'Opera ').replace('Version/', 'Safari ').replace('/', ' ');
     return 'Graphics: ' + gpuName + '\n' +
       'Frame rate: ' + (perf.fps ? Math.round(perf.fps) + ' fps' : 'measuring...') + '\n' +
+      'Graphics card time: ' + (perf.gpu ? perf.gpu.toFixed(1) + ' ms per frame (aiming for under ' + perf.budget.toFixed(1) + ')' : (tq ? 'measuring...' : 'not reported by this browser')) + '\n' +
+      'Stutters: ' + stutterTimes.length + ' in the last minute\n' +
+      'Screen: ' + stage.clientWidth + ' x ' + stage.clientHeight + ' at ' + (window.devicePixelRatio || 1) + 'x, ' + br + '\n' +
+      'Scene: ' + SCENES[sceneIx].name + ', ' + LOGO_LABEL[logoMode] + (hydraOn ? ', Hydra on (' + WHERE_LABEL[hydraWhere].replace('Shows on: ', '') + ')' : '') + '\n' +
       'Drawing ' + rw + ' x ' + rh + ' of ' + sw + ' x ' + sh + ' (' + pct + '% of the pixels)' + (useFbo && rw < canvas.width ? ', sharpened up to full size' : '') + '\n' +
-      QLABEL[quality] + (hydraOn ? '\nHydra: on' : '') + (adv ? '\n\n' + adv : '');
+      QLABEL[quality] + (adv ? '\n\n' + adv : '');
   }
   var infoOn = false;
   function toggleInfo(v) {
     infoOn = typeof v === 'boolean' ? v : !infoOn;
     $('info').classList.toggle('on', infoOn);
-    if (infoOn) $('info').textContent = infoText();
+    if (infoOn) $('infoText').textContent = infoText();
   }
-  setInterval(function () { if (infoOn) $('info').textContent = infoText(); }, 500);
+  // the text stops updating while the pointer is over it, so it can be selected and copied
+  var infoHover = false;
+  $('info').addEventListener('pointerenter', function () { infoHover = true; });
+  $('info').addEventListener('pointerleave', function () { infoHover = false; });
+  setInterval(function () { if (infoOn && !infoHover) $('infoText').textContent = infoText(); }, 500);
+  $('infoCopy').addEventListener('click', function () {
+    var txt = infoText(), btn = this;
+    function done(ok) { btn.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(function () { btn.textContent = 'Copy'; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { fallbackCopy(); });
+    else fallbackCopy();
+    function fallbackCopy() {
+      var ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta); done(ok);
+    }
+  });
   $('infoBtn').addEventListener('click', function () { toggleInfo(); });
   if (softwareGpu || lowPowerGpu) { toggleInfo(true); setStatus(softwareGpu ? 'Running without your graphics card, so it will be slow. See the box at the top right.' : 'Running on the low-power graphics chip. See the box at the top right.'); }
   function showQuality() { $('qualBtn').textContent = QLABEL[quality]; }
