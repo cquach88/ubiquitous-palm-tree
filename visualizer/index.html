@@ -232,21 +232,23 @@ float logoMask(vec2 c) {
   return texture2D(uLogo, (floor(c) + 0.5) / uLogoB.xy).r;
 }
 // Returns the emblem's color at cell position c (alpha in w): white core with a red and
-// cyan split like the artwork, slice glitches on hits, faint scanlines, and a soft glow.
+// cyan split like the artwork, slice glitches on hits, and a soft glow.
 vec4 logoAt(vec2 c) {
   float slot = floor(uTime * 14.0);
-  float band = floor(c.y / 9.0);
+  // everything moves in whole art pixels (2 texels), so edges and corners stay on the grid
+  float band = floor(c.y / 8.0);
   float g = hash2(vec2(band, slot));
-  c.x += uLogoA.y * step(0.62, g) * (hash2(vec2(slot, band + 7.0)) - 0.5) * 34.0;
-  float s = uLogoA.z;
+  c.x += 2.0 * floor(uLogoA.y * step(0.62, g) * (hash2(vec2(slot, band + 7.0)) - 0.5) * 17.0 + 0.5);
+  // color split: red copy shifted left, cyan copy shifted right, by whole art pixels and
+  // with no vertical offset, so every top and bottom edge (and so every corner) lines up
+  float s = max(2.0, 2.0 * floor(uLogoA.z * 0.5 + 0.5));
   float w = logoMask(c);
-  float r = logoMask(c + vec2(s, 0.15 * s));
-  float b = logoMask(c - vec2(s, 0.15 * s));
+  float r = logoMask(c + vec2(s, 0.0));
+  float b = logoMask(c - vec2(s, 0.0));
   vec3 core = vec3(max(w, r), max(w, b), max(w, b));
-  float scan = 0.86 + 0.14 * smoothstep(0.15, 0.5, abs(fract(c.y / 3.0) - 0.5));
   float a = max(w, max(r, b));
   float glow = texture2D(uLogoGlow, c / uLogoB.xy).r;
-  return vec4(core * scan * uLogoA.w, a) + vec4(mix(vec3(1.0), uAur * 2.0, 0.5) * glow * 0.35 * uLogoA.w, 0.0);
+  return vec4(core * uLogoA.w, a) + vec4(mix(vec3(1.0), uAur * 2.0, 0.5) * glow * 0.35 * uLogoA.w, 0.0);
 }
 
 vec3 hazeCol(vec3 rd) {
@@ -1205,8 +1207,8 @@ void main() {
     var lmode = !logoReady ? 0 : logoMode === 'sky' ? 1 : logoMode === 'front' ? 2 : 0;
     // front: emblem 72% of screen height, narrowed on tall phones so it never clips
     var frontScale = logoInnerH / Math.min(1.44, 2 * aspect * 0.86 * logoInnerH / logoInnerW);
-    var split = (2.2 + (calm ? 0 : 6 * beatEnv)) * logoInnerH / 350;   // the artwork's own split is about 2 texels
-    gl.uniform4f(U.uLogoA, lmode, calm ? 0 : glitch, split * (lmode === 1 ? 2.6 : 1), 0.85 + 0.5 * beatEnv);
+    var split = 2 + (calm ? 0 : 6 * beatEnv);   // texels; the artwork's own split is one art pixel (2 texels)
+    gl.uniform4f(U.uLogoA, lmode, calm ? 0 : glitch, split * (lmode === 1 ? 2 : 1), 0.85 + 0.5 * beatEnv);
     // sky: the emblem spans 0.42 radians (about 24 degrees) of the view, centered 0.34 above the horizon
     gl.uniform4f(U.uLogoB, LW, LH, frontScale * (1 - (calm ? 0 : 0.035 * beatEnv)), logoInnerH / 0.42);
 
