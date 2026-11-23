@@ -53,7 +53,9 @@ body.quiet .strip { -webkit-backdrop-filter: none; backdrop-filter: none; }
   white-space: pre-wrap; overflow-wrap: anywhere; display: none; z-index: 2;
 }
 #info.on { display: block; }
-#hydraView { position: absolute; inset: 0; width: 100%; height: 100%; display: none; pointer-events: none; }
+#hydraView { position: absolute; inset: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 1; }
+.plate, .strip { z-index: 2; }
+#info { z-index: 3; }
 #hydraView.on { display: block; }
 #hydraPanel {
   position: absolute; z-index: 3;
@@ -225,13 +227,14 @@ button[hidden], .filebtn[hidden] { display: none; }
       <strong>Hydra</strong>
       <select id="hydraPreset" aria-label="Hydra preset"></select>
       <button id="hydraRun" type="button" title="Run (Ctrl+Enter)">Run</button>
+      <button id="hydraWhere" type="button">Shows on: Screen</button>
       <button id="hydraOff" type="button">Off</button>
       <button id="hydraClose" type="button" aria-label="Hide the code panel">Hide</button>
     </div>
     <textarea id="hydraCode" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Hydra code"></textarea>
     <div id="hydraMsg" role="status" aria-live="polite"></div>
     <div class="hp-foot">s0 is the visualizer's picture. Music: kick, bass, mid, treb, energy (0 to 1), beatPhase; bpm follows the song.
-Ctrl+Enter runs. Keys 1 to 6 pick a preset, 0 turns Hydra off, ` shows or hides this panel.
+Ctrl+Enter runs. Keys 1 to 9 pick a preset; 0 or Esc turns Hydra off; ` shows or hides this panel.
 <a href="https://hydra.ojack.xyz" target="_blank" rel="noopener">Hydra</a> by Olivia Jack and contributors, AGPL-3.0 (<a href="vendor/hydra/LICENSE" target="_blank">license</a>). Visualizer source: <a href="https://github.com/cquach88/ubiquitous-palm-tree/tree/claude/inspiring-ritchie-6txz4w/visualizer" target="_blank" rel="noopener">GitHub</a>.</div>
   </div>
   <div id="info" aria-live="off"></div>
@@ -259,6 +262,8 @@ uniform vec4 uGlass;            // style (0 pixel, 1 glass), tube width (texels)
 uniform vec4 uD;                // glass spheres, glass pillars, prism ribbon, glass head backdrop (per scene)
 uniform vec4 uOrbC;             // the 3D C: amount (0 = off), height, distance ahead of the camera, turn (radians)
 uniform vec4 uOrbC2;            // its edge radius, half-thickness, glass amount (1 = the clear glass pane variant)
+uniform sampler2D uHyd;         // Hydra's latest frame, for painting onto surfaces
+uniform float uHydAmt;          // how strongly it is painted (0 = off)
 
 const float FAR = 150.0;
 const float SL = 28.0;
@@ -535,6 +540,21 @@ float sdOrbC(vec3 p) {
   return (abs(q.z) - hz) * 0.6;
 }
 
+// where a point on the 3D C sits across its face, 0 to 1 in each direction
+vec2 orbCUV(vec3 p) {
+  vec3 q = p - vec3(0.0, uOrbC.y, uCamZ + uOrbC.z);
+  float ca = cos(uOrbC.w), sa = sin(uOrbC.w);
+  q.x = ca * q.x - sa * q.z;
+  float k = OCH / (uLogoB.y - 80.0);
+  return vec2(q.x / ((uLogoB.x - 80.0) * k) + 0.5, q.y / OCH + 0.5);
+}
+// Hydra's frame painted onto a surface: partly replacing its color, partly glowing
+vec3 hydraPaint(vec3 col, vec2 uv) {
+  if (uHydAmt < 0.01) return col;
+  vec3 h = texture2D(uHyd, vec2(fract(uv.x), 1.0 - fract(uv.y))).rgb;
+  return mix(col, h * 1.15, 0.7 * uHydAmt) + h * 0.25 * uHydAmt;
+}
+
 vec3 orbCNormal(vec3 p) {
   vec2 e = vec2(0.004, 0.0);
   return normalize(vec3(sdOrbC(p + e.xyy) - sdOrbC(p - e.xyy), sdOrbC(p + e.yxy) - sdOrbC(p - e.yxy),
@@ -610,7 +630,8 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
     float rim = pow(1.0 - ndv, 3.0);
     vec3 chrome = env * uSphTint + uAur * rim * (0.15 + 0.9 * uAudio.w);
     float gm = m > 3.5 ? max(uD.x, uOrbC2.z) : uD.x;   // the glass C variant is always glass
-    if (gm < 0.01) return chrome;
+    vec2 huv = m > 3.5 ? orbCUV(p) : vec2(atan(n.x, n.z) * 0.159 + 0.5 + uTime * 0.02, n.y * 0.5 + 0.5);
+    if (gm < 0.01) return hydraPaint(chrome, huv);
     // glass bubble: see-through, a thin bright outline, iridescent sheen toward the edge
     vec3 tr = refract(rd, n, 0.7);
     vec3 through = tr.y > 0.0 ? skyBase(tr) : mix(uWater, hazeCol(tr), 0.5);
@@ -618,7 +639,7 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
     vec3 irid = prism(dot(n, vec3(0.3, 0.8, 0.2)) * 0.8 + uTime * 0.05 + s.z * 0.013) * smoothstep(0.45, 1.0, 1.0 - ndv);
     float rimLine = exp(-pow((ndv - 0.07) / 0.045, 2.0));
     vec3 glass = through * 0.8 + env * Fg + irid * (0.7 + 1.6 * uAudio.w) + vec3(rimLine) * 1.3;
-    return mix(chrome, glass, gm);
+    return hydraPaint(mix(chrome, glass, gm), huv);
   }
   float cz = (floor(p.z / PS) + 0.5) * PS;
   float u = clamp((cz - uCamZ) / PRANGE, 0.0, 1.0);
@@ -655,6 +676,11 @@ vec3 shade(vec3 p, vec3 rd, float m, float t) {
     float topG = smoothstep(h - 0.5, h, p.y);
     vec3 glass = through * 0.7 + env * fr * 0.25 + pc * edgeL * (0.7 + 2.8 * lv) + pc * topG * (0.1 + 1.4 * lv) * 0.5;
     col = mix(col, glass, uD.y);
+  }
+  if (uHydAmt > 0.01) {
+    float lx = abs(p.x) - PX + 0.5, lz = p.z - cz + 0.5;
+    vec2 puv = abs(n.x) > 0.5 ? vec2(lz, p.y / h) : n.y > 0.5 ? vec2(lx, lz) : vec2(lx, p.y / h);
+    col = hydraPaint(col, puv);
   }
   return col;
 }
@@ -723,6 +749,10 @@ vec3 render(vec3 ro, vec3 rd) {
       float F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
       vec3 add = refl * (F + 0.3 * rim) + vec3(1.0, 0.98, 0.95) * rim * (0.35 + 0.6 * uAudio.w)
                + prism(dot(n, vec3(0.4, 0.9, 0.1)) + uTime * 0.04) * rim * 0.25;
+      if (uHydAmt > 0.01) {
+        vec2 cuv = orbCUV(p);
+        add += texture2D(uHyd, vec2(cuv.x, 1.0 - cuv.y)).rgb * 0.8 * uHydAmt;
+      }
       float fk = exp(-t * uC.x);                           // fog between the camera and the glass
       gMul = vec3(0.95, 0.97, 1.0) * (0.92 - 0.3 * rim) * fk;
       gAdd = add * fk + hazeCol(rd) * (1.0 - fk);
@@ -940,7 +970,7 @@ void main() {
 
   var U = {};
   ['uRes', 'uTime', 'uCamZ', 'uFocal', 'uFit', 'uCam', 'uLook', 'uAudio', 'uSpec', 'uWave', 'uSkyTop', 'uSkyHor', 'uSunCol', 'uSun',
-   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC', 'uLogo', 'uLogoGlow', 'uLogoA', 'uLogoB', 'uLogoSdf', 'uHead', 'uGlass', 'uD', 'uOrbC', 'uOrbC2'].forEach(function (n) {
+   'uTerA', 'uTerB', 'uWater', 'uPilCol', 'uSphTint', 'uAur', 'uA', 'uB', 'uC', 'uLogo', 'uLogoGlow', 'uLogoA', 'uLogoB', 'uLogoSdf', 'uHead', 'uGlass', 'uD', 'uOrbC', 'uOrbC2', 'uHyd', 'uHydAmt'].forEach(function (n) {
     U[n] = gl.getUniformLocation(prog, n);
   });
 
@@ -1054,6 +1084,16 @@ void main() {
     for (y = 0; y < H; y++) { for (x = 0; x < W; x++) f[x] = g[y * W + x]; edt1(f, W, d, v, z); for (x = 0; x < W; x++) g[y * W + x] = d[x]; }
   }
   gl.uniform1i(U.uLogo, 2); gl.uniform1i(U.uLogoGlow, 3); gl.uniform1i(U.uLogoSdf, 4); gl.uniform1i(U.uHead, 5);
+  gl.uniform1i(U.uHyd, 7);
+  var hydTex = gl.createTexture();                    // Hydra's frame, for painting on objects
+  gl.activeTexture(gl.TEXTURE7);
+  gl.bindTexture(gl.TEXTURE_2D, hydTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(3));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  var hydAmt = 0;
   logoTex(4, 1, 1, new Uint8Array([0]), gl.LINEAR);
   (function () {                                      // glass head backdrop
     var tx = gl.createTexture();
@@ -1653,6 +1693,8 @@ void main() {
     var glassStyle = /^glass/.test(logoMode) ? 1 : 0;
     gl.uniform4f(U.uGlass, glassStyle, 6 + (calm ? 0 : 1.2 * beatEnv), 1 + (calm ? 0 : 1.6 * beatEnv), 0.85 + (calm ? 0 : 1.1 * beatEnv));
     gl.uniform4f(U.uD, P[41], P[42], P[43], P[44]);
+    hydAmt += ((hydraOn && hydraWhere !== 'screen' ? 1 : 0) - hydAmt) * Math.min(1, dt * 4);
+    gl.uniform1f(U.uHydAmt, hydAmt < 0.005 ? 0 : hydAmt);
     // the 3D C rises out of the water when chosen and sinks away when not
     var solidC = logoMode === 'orb' || logoMode === 'glass3d';
     orbAmt += ((solidC && logoReady ? 1 : 0) - orbAmt) * Math.min(1, dt * 1.2);
@@ -1701,6 +1743,9 @@ void main() {
      its own canvas on top. Hydra's own timer and microphone are off: it steps with ours. */
   var hydra = null, hydraOn = false, hydraLoading = false, hydraCv = $('hydraView');
   var hydraGood = '', hydraPending = null, hydraWatch = 0;
+  var WHERE = ['screen', 'objects', 'both'], WHERE_LABEL = { screen: 'Shows on: Screen', objects: 'Shows on: Objects', both: 'Shows on: Both' };
+  var hydraWhere = 'screen';
+  try { var hw = localStorage.getItem('mirrorsea.hydraWhere'); if (WHERE.indexOf(hw) >= 0) hydraWhere = hw; } catch (e) {}
   var HYDRA_HEAD = '// Hydra over the visualizer. s0 = its picture. Ctrl+Enter to run.\n';
   var HYDRA_PRESETS = [
     ['Kaleidoscope',
@@ -1712,9 +1757,15 @@ void main() {
     ['Pixel crunch',
      'src(s0)\n  .pixelate(() => 160 - kick * 110, () => 90 - kick * 62)\n  .out()'],
     ['Neon edges',
-     'src(s0)\n  .diff(src(s0).scale(1.008))\n  .saturate(2.5)\n  .contrast(1.6)\n  .brightness(() => kick * 0.15)\n  .out()'],
+     'src(s0)\n  .diff(src(s0).scale(1.012))\n  .color(4.5, 4.5, 4.5)\n  .saturate(2.8)\n  .add(src(s0).color(0.6, 0.6, 0.66), 1)\n  .brightness(() => kick * 0.25)\n  .out()'],
     ['Glitch slices',
-     'src(s0)\n  .modulateScrollX(osc(40, 0).thresh(0.5).rotate(Math.PI / 2), () => kick * 0.12)\n  .out()']
+     'src(s0)\n  .modulateScrollX(osc(40, 0).thresh(0.5).rotate(Math.PI / 2), () => kick * 0.12)\n  .out()'],
+    ['Rings (for objects)',
+     'osc(() => 20 + kick * 30, 0.1, 1.2)\n  .kaleid(5)\n  .modulate(noise(3), 0.1)\n  .out()'],
+    ['Noise flow (for objects)',
+     'noise(4, 0.2)\n  .color(0.6, 0.3, 1)\n  .modulate(osc(3), () => 0.1 + kick * 0.3)\n  .saturate(2)\n  .out()'],
+    ['Pulse grid (for objects)',
+     'shape(4, () => 0.3 + kick * 0.4, 0.05)\n  .repeat(6, 6)\n  .color(0, 1, 0.8)\n  .rotate(() => time * 0.1)\n  .out()']
   ];
   HYDRA_PRESETS.forEach(function (pr, i) {
     var o = document.createElement('option'); o.value = String(i); o.textContent = (i + 1) + '  ' + pr[0];
@@ -1728,9 +1779,11 @@ void main() {
   function hydraSay(msg, isErr) { $('hydraMsg').textContent = msg; $('hydraMsg').classList.toggle('err', !!isErr); }
   function hydraSize() {
     if (!hydra) return;
-    // Hydra's effects are cheap, but keep its canvas at or below about 1440p
+    // Hydra's effects are cheap, but keep its canvas at or below about 1440p; painting on
+    // objects needs far less, and its frame is copied into the visualizer every frame
     var k = Math.min(1, Math.sqrt(3.7e6 / (canvas.width * canvas.height)));
     var w = Math.max(64, Math.round(canvas.width * k)), h = Math.max(64, Math.round(canvas.height * k));
+    if (hydraWhere === 'objects') { w = 640; h = 360; }
     if (hydraCv.width !== w || hydraCv.height !== h) hydra.setResolution(w, h);
   }
   function loadHydra(cb) {
@@ -1768,9 +1821,16 @@ void main() {
       try { localStorage.setItem('mirrorsea.hydraCode', code); } catch (e) {}
     });
   }
+  function setWhere(w) {
+    hydraWhere = w;
+    $('hydraWhere').textContent = WHERE_LABEL[w];
+    hydraCv.classList.toggle('on', hydraOn && w !== 'objects');
+    try { localStorage.setItem('mirrorsea.hydraWhere', w); } catch (e) {}
+    hydraSize();
+  }
   function setHydra(on) {
     hydraOn = on;
-    hydraCv.classList.toggle('on', on);
+    hydraCv.classList.toggle('on', on && hydraWhere !== 'objects');
     $('hydraBtn').classList.toggle('on', on);
     if (!on) hydraSay('Hydra is off. Run code or pick a preset to turn it back on.');
   }
@@ -1797,6 +1857,12 @@ void main() {
     var failed = null, warn = console.warn;
     if (hydraWatch > 0) console.warn = function () { failed = Array.prototype.join.call(arguments, ' '); };
     try { hydra.tick(Math.min(100, raw * 1000)); } catch (e) { failed = String(e.message || e); }
+    if (hydraWhere !== 'screen') {
+      // copy this frame of Hydra into the visualizer; its surfaces use it on the next frame
+      gl.activeTexture(gl.TEXTURE7);
+      gl.bindTexture(gl.TEXTURE_2D, hydTex);
+      try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, hydraCv); } catch (e) {}
+    }
     if (hydraWatch > 0) {
       console.warn = warn;
       if (failed) {
@@ -1806,6 +1872,8 @@ void main() {
       } else if (--hydraWatch === 0) { hydraGood = hydraPending; }
     }
   }
+  $('hydraWhere').addEventListener('click', function () { setWhere(WHERE[(WHERE.indexOf(hydraWhere) + 1) % WHERE.length]); });
+  setWhere(hydraWhere);
   $('hydraBtn').addEventListener('click', function () { showHydraPanel(); });
   $('hydraClose').addEventListener('click', function () { showHydraPanel(false); });
   $('hydraOff').addEventListener('click', function () { setHydra(false); });
@@ -1961,7 +2029,12 @@ void main() {
   window.addEventListener('keydown', function (e) {
     if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;   // typing code
     if (e.key === '`') { e.preventDefault(); showHydraPanel(); return; }
-    if (/^[1-6]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) { hydraPreset(+e.key - 1); return; }
+    if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) { hydraPreset(+e.key - 1); return; }
+    if (e.key === 'Escape') {                         // the way out: Hydra off, then the panel closes
+      if (hydraOn) setHydra(false); else if (!$('hydraPanel').hidden) showHydraPanel(false);
+      document.body.classList.remove('quiet');
+      return;
+    }
     if (e.key === '0' && !e.ctrlKey && !e.metaKey) { setHydra(false); return; }
     var tg = e.target && e.target.tagName;
     var typing = tg === 'INPUT' && e.target.type !== 'range';
