@@ -29,6 +29,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # keep the visualizer (published separately) when the game redeploys
+      - run: cp -r visualizer dist/visualizer
       - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

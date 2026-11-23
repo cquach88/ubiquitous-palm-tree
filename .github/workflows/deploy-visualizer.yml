@@ -1,0 +1,29 @@
+name: Deploy visualizer to GitHub Pages
+
+# Publishes visualizer/ to the gh-pages branch under /visualizer/ only,
+# leaving the card game at the site root untouched.
+# Live at https://cquach88.github.io/ubiquitous-palm-tree/visualizer/
+
+on:
+  push:
+    branches: [main, claude/inspiring-ritchie-6txz4w]
+    paths: ['visualizer/**', '.github/workflows/deploy-visualizer.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./visualizer
+          destination_dir: visualizer
