@@ -1146,6 +1146,9 @@ void main() {
     var sw = Math.max(48, Math.round(w * scale)), sh = Math.max(48, Math.round(h * scale));
     // the screen image is full resolution (up to about 4K); the scene is drawn at sw x sh
     var ds = useFbo ? Math.min(dpr, Math.sqrt(8.3e6 / (w * h))) : scale;
+    // while Hydra covers the screen our picture is only its source: skip the upscale, so
+    // Hydra copies a smaller image each frame
+    if (hydraOn && hydraWhere !== 'objects') ds = scale;
     var cw = Math.max(48, Math.round(w * ds)), ch = Math.max(48, Math.round(h * ds));
     if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
     if (useFbo) sizeFbo(Math.min(sw, cw), Math.min(sh, ch));
@@ -1178,7 +1181,8 @@ void main() {
     // the display's refresh interval: the fastest pace seen, never slower than 30 Hz
     baseFrame = Math.max(1 / 144, Math.min(baseFrame, med, 1 / 30));
     var target = Math.max(baseFrame * 1.15, quality === 'sharp' ? 1 / 40 : 1 / 55);
-    var ok = med <= target && slow < n / 12;
+    // stutter counts: more than 1 slow frame in 30 is not ok; stepping up needs none at all
+    var ok = med <= target && slow <= n / 30;
     perf.fps = 1 / med;
     if (quality === 'fast' || now - lastChange < 1200) return;
     if (!ok && step > 0) {
@@ -1188,7 +1192,7 @@ void main() {
       while (top < STEPS.length - 1 && STEPS[top + 1] < np * 0.9) top++;
       step = Math.max(0, Math.min(step - (med > target * 3 ? 3 : 1), top));   // far too slow: drop faster
       lastChange = now; resize();
-    } else if (ok && step < ceiling && !atNative && now - lastChange > 2500) {
+    } else if (ok && slow === 0 && step < ceiling && !atNative && now - lastChange > 2500) {
       step++; lastUp = lastChange = now; resize();
     }
   }
@@ -1779,10 +1783,14 @@ void main() {
   function hydraSay(msg, isErr) { $('hydraMsg').textContent = msg; $('hydraMsg').classList.toggle('err', !!isErr); }
   function hydraSize() {
     if (!hydra) return;
-    // Hydra's effects are cheap, but keep its canvas at or below about 1440p; painting on
-    // objects needs far less, and its frame is copied into the visualizer every frame
-    var k = Math.min(1, Math.sqrt(3.7e6 / (canvas.width * canvas.height)));
-    var w = Math.max(64, Math.round(canvas.width * k)), h = Math.max(64, Math.round(canvas.height * k));
+    // Hydra's patterns are smooth, so about 1080p is plenty on any screen (the browser
+    // scales it up); painting on objects needs far less, and in 'both' its frame is also
+    // copied into the visualizer every frame, so that stays at 720p
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var sw = (stage.clientWidth || 320) * dpr, sh = (stage.clientHeight || 480) * dpr;
+    var cap = hydraWhere === 'both' ? 0.92e6 : 2.1e6;
+    var k = Math.min(1, Math.sqrt(cap / (sw * sh)));
+    var w = Math.max(64, Math.round(sw * k)), h = Math.max(64, Math.round(sh * k));
     if (hydraWhere === 'objects') { w = 640; h = 360; }
     if (hydraCv.width !== w || hydraCv.height !== h) hydra.setResolution(w, h);
   }
@@ -1806,13 +1814,18 @@ void main() {
     sc.onerror = function () { hydraLoading = false; hydraSay('Hydra could not be loaded. Check the connection and try again.', true); };
     document.head.appendChild(sc);
   }
+  function hydraApply(code) {
+    hydra.eval(code);
+    // copying the visualizer into Hydra costs time every frame: only do it when the code uses it
+    window.s0.dynamic = /\bs0\b/.test(code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''));   // comments do not count
+  }
   function hydraRun(code) {
     loadHydra(function () {
       try {
-        hydra.eval(code);
+        hydraApply(code);
       } catch (e) {
         hydraSay('Error: ' + (e.message || e) + (hydraGood ? '\nStill showing the last code that worked.' : ''), true);
-        if (hydraGood) { try { hydra.eval(hydraGood); } catch (e2) {} }
+        if (hydraGood) { try { hydraApply(hydraGood); } catch (e2) {} }
         return;
       }
       hydraPending = code; hydraWatch = 2;        // confirm it draws before calling it good
@@ -1826,11 +1839,13 @@ void main() {
     $('hydraWhere').textContent = WHERE_LABEL[w];
     hydraCv.classList.toggle('on', hydraOn && w !== 'objects');
     try { localStorage.setItem('mirrorsea.hydraWhere', w); } catch (e) {}
+    resize();
     hydraSize();
   }
   function setHydra(on) {
     hydraOn = on;
     hydraCv.classList.toggle('on', on && hydraWhere !== 'objects');
+    resize();
     $('hydraBtn').classList.toggle('on', on);
     if (!on) hydraSay('Hydra is off. Run code or pick a preset to turn it back on.');
   }
@@ -1868,7 +1883,7 @@ void main() {
       if (failed) {
         hydraWatch = 0;
         hydraSay('Error: ' + failed.replace(/^Error during tick\(\):\s*/, '').slice(0, 300) + (hydraGood ? '\nStill showing the last code that worked.' : ''), true);
-        if (hydraGood) { try { hydra.eval(hydraGood); } catch (e) {} } else setHydra(false);
+        if (hydraGood) { try { hydraApply(hydraGood); } catch (e) {} } else setHydra(false);
       } else if (--hydraWatch === 0) { hydraGood = hydraPending; }
     }
   }
